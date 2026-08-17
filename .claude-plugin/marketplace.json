@@ -1,0 +1,14 @@
+{
+  "name": "studiokyoung",
+  "owner": {
+    "name": "Kyoung Hoon Kim",
+    "url": "https://github.com/studiokyoung"
+  },
+  "plugins": [
+    {
+      "name": "kyoung",
+      "source": ".",
+      "description": "Claude Code skills Kyoung Hoon Kim dogfoods daily, starting with explain-diff, an approval gate for AI-written diffs."
+    }
+  ]
+}
