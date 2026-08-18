@@ -1,13 +1,14 @@
 # claude-skills
 
-Claude Code skills I use on my own work every day. Each one is a working method
-of mine written out far enough that an agent can run it: what to look at, in
-what order, what to refuse to do, and what the output has to look like. They
-started as things I kept repeating in chat, so I moved them into skills and let
-the review rounds tighten them.
+Claude Code skills I use on my own work. Each one is a working method of mine
+written out far enough that an agent can run it: what to look at, in what
+order, what to refuse to do, and what the output has to look like. They started
+as things I kept repeating in chat, so I moved them into skills and let the
+review rounds tighten them.
 
 I am Kyoung Hoon Kim ([studiokyoung](https://github.com/studiokyoung)), a
-design engineer. These are the skills that survived contact with real projects.
+design engineer. This is the first one that survived contact with real
+projects; more follow as they earn it.
 
 ## Skills
 
@@ -36,7 +37,9 @@ ln -sfn ~/claude-skills/skills/explain-diff ~/.claude/skills/explain-diff
 ```
 
 That gives you `/explain-diff`, and `git pull` updates it in place with no
-copies to drift.
+copies to drift. If the checkout lives outside your project, add it to
+`permissions.additionalDirectories` in `~/.claude/settings.json` so the skill's
+reference files can be read without prompts.
 
 To try the whole repo without installing anything, point one session at the
 checkout:
@@ -77,7 +80,9 @@ Every row of the report answers both:
 | # | hunk | what | why, and the evidence source | verdict |
 |---|------|------|------------------------------|---------|
 | 1 | api.ts:42 | adds 3 retries | conversation, user asked to "handle the flaky network" | ✅ |
-| 2 | config.ts:3 | debug log at import time | no evidence found, defensive addition | ✂️ |
+| 2 | config.ts:3 | debug log at import time | no evidence found, leftover debug log | ✂️ |
+| 3 | api.ts:60 | wraps 4 call sites in try/catch | plan asked to harden one call, not four | 🔻 |
+| 4 | schema.ts:18 | widens a field to nullable | no evidence found, may be a migration | ❓ |
 ```
 
 | Verdict | Meaning |
@@ -132,8 +137,8 @@ The rule that earns its keep is "no evidence found". A change nothing in the
 session asked for is usually the change I would have regretted, and naming that
 absence out loud is what makes it visible.
 
-It went through its own gate: reviewing the skill's diff caught an
-untracked-file blind spot and a broken base-branch fallback in v2.
+It went through its own gate: reviewing the v2 diff caught an untracked-file
+blind spot and an evidence-ladder fallback that skipped the session docs.
 
 ## Changelog
 
