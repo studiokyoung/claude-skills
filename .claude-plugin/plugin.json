@@ -1,6 +1,6 @@
 {
   "name": "kyoung",
-  "description": "Claude Code skills Kyoung Hoon Kim dogfoods daily, starting with explain-diff, an approval gate for AI-written diffs.",
+  "description": "Claude Code skills Kyoung Hoon Kim uses on his own work, starting with explain-diff, an approval gate for AI-written diffs.",
   "version": "0.1.0",
   "author": {
     "name": "Kyoung Hoon Kim",
