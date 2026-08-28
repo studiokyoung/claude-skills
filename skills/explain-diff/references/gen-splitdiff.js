@@ -13,10 +13,18 @@
 //     { "id": "309", "heading": "#309 · ISSUE-42, retry on a flaky network", "range": "A..B" }, // PR-shaped
 //     { "id": "1", "heading": "feff14e, add the comment convention", "range": "X~1..X" }  // bare commit: short sha, then summary
 //   ],
-//   "notes": { "<sectionId>:<repo-relative-path>": "<html explanation>" }
+//   "notes": { "<sectionId>:<repo-relative-path>": "<html explanation>" },
+//   "lineNotes": {   // OPTIONAL — html-mode per-line mechanic notes, revealed by click.
+//     "<sectionId>:<repo-relative-path>:R<newLineNumber>": "<html>",  // right/new line, common case
+//     "<sectionId>:<repo-relative-path>:L<oldLineNumber>": "<html>"   // removed left line, rare
+//   }
+//   // Key side is R (a right/new line, keyed by its new line number) or L (a
+//   // removed line, keyed by its old number). Values are HTML — escape <, >, &
+//   // in code or wrap it in <code>, same as notes. Absent → renders as before.
 // }
 // Prints matched/unused note counts at the end. An unused key means a typo'd
-// path and a silently dropped note; fix the key and re-run.
+// path and a silently dropped note; fix the key and re-run. lineNotes get the
+// same treatment: a "lineNotes: n/m matched" line and an UNUSED LINE-NOTE KEYS warning.
 //
 // Note-writing rules (the skill's html section owns these, the script only
 // prints the counts): plain language for someone who did not live the session,
@@ -52,7 +60,7 @@ function parseFileDiff(chunk) {
   return { path, hunks, adds, dels };
 }
 
-function renderHunk(h) {
+function renderHunk(h, secId, path, lineNotes, usedLineNotes) {
   const rows = [];
   let ol = h.oldStart, nl = h.newStart, i = 0;
   const L = h.lines;
@@ -78,14 +86,22 @@ function renderHunk(h) {
   for (const r of rows) {
     const lcls = r.lt === null ? 'empty' : (r.cls === 'chg' ? 'del' : 'ctx');
     const rcls = r.rt === null ? 'empty' : (r.cls === 'chg' ? 'add' : 'ctx');
-    html += `<tr><td class="num ${lcls}">${r.ln ?? ''}</td><td class="code ${lcls}">${r.lt !== null ? esc(r.lt) || '&nbsp;' : ''}</td>` +
-            `<td class="num ${rcls}">${r.rn ?? ''}</td><td class="code ${rcls}">${r.rt !== null ? esc(r.rt) || '&nbsp;' : ''}</td></tr>`;
+    // Line note: prefer the right/new line (R<rn>), else a removed left line (L<ln>).
+    const lnKey = r.rn != null ? `${secId}:${path}:R${r.rn}` : (r.ln != null ? `${secId}:${path}:L${r.ln}` : null);
+    const lnote = lnKey ? lineNotes[lnKey] : undefined;
+    if (lnote) usedLineNotes.add(lnKey);
+    const trAttr = lnote ? ' class="lnrow" data-lnote tabindex="0"' : '';
+    const dot = lnote ? '<span class="lndot">•</span>' : '';
+    html += `<tr${trAttr}><td class="num ${lcls}">${r.ln ?? ''}</td><td class="code ${lcls}">${r.lt !== null ? esc(r.lt) || '&nbsp;' : ''}</td>` +
+            `<td class="num ${rcls}">${dot}${r.rn ?? ''}</td><td class="code ${rcls}">${r.rt !== null ? esc(r.rt) || '&nbsp;' : ''}</td></tr>`;
+    if (lnote) html += `<tr class="lnpanel" hidden><td class="lnpanelcell" colspan="4"><div class="lnnote">💡 ${lnote}</div></td></tr>`;
   }
   return html + '</table>';
 }
 
 let body = '', toc = '';
 const usedNotes = new Set();
+const usedLineNotes = new Set();
 for (const sec of cfg.sections) {
   const raw = execFileSync('git', ['-C', cfg.repo, 'diff', '-M', '-U3', sec.range], { maxBuffer: 64 * 1024 * 1024 }).toString();
   const files = raw.split(/^(?=diff --git )/m).filter((c) => c.startsWith('diff --git ')).map(parseFileDiff).filter((f) => f.path);
@@ -97,12 +113,26 @@ for (const sec of cfg.sections) {
     if (note) usedNotes.add(noteKey);
     body += `<details class="file" open><summary><span class="fp mono">${esc(f.path)}</span><span class="stat"><b class="a">+${f.adds}</b> <b class="d">−${f.dels}</b></span></summary>`;
     if (note) body += `<div class="note">${note}</div>`;
-    for (const h of f.hunks) body += renderHunk(h);
+    for (const h of f.hunks) body += renderHunk(h, sec.id, f.path, cfg.lineNotes || {}, usedLineNotes);
     body += `</details>`;
   }
   body += '</section>';
 }
 
+const lnScript = usedLineNotes.size ? `<script>
+(function(){
+  function toggle(row){
+    var p = row.nextElementSibling;
+    if (p && p.classList.contains('lnpanel')) p.hidden = !p.hidden;
+  }
+  document.querySelectorAll('tr[data-lnote]').forEach(function(row){
+    row.addEventListener('click', function(){ toggle(row); });
+    row.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(row); }
+    });
+  });
+})();
+</script>` : '';
 const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(cfg.title)}</title>
@@ -130,6 +160,12 @@ h1{font-size:19px;margin:0 0 4px}
 @media(prefers-color-scheme:dark){.stat .a{color:#3fb950}.stat .d{color:#f85149}}
 .note{padding:10px 14px;background:var(--notebg);border-left:3px solid var(--noteline);font-size:13.5px;line-height:1.65}
 .note code{background:rgba(128,128,128,.15);padding:0 4px;border-radius:4px;font-size:12px}
+.lnrow{cursor:pointer}
+tr.lnrow:hover,tr.lnrow:focus-visible{outline:2px solid var(--noteline);outline-offset:-2px}
+.lndot{color:var(--noteline);font-weight:700;margin-right:3px}
+tr.lnpanel>td.lnpanelcell{padding:0;border:0}
+.lnnote{padding:9px 14px;background:var(--notebg);border-left:3px solid var(--noteline);font-size:13px;line-height:1.6}
+.lnnote code{background:rgba(128,128,128,.15);padding:0 4px;border-radius:4px;font-size:12px}
 .hunkhdr{padding:4px 12px;background:var(--card);color:var(--muted);font-size:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 table.split{width:100%;border-collapse:collapse;table-layout:fixed}
 col.cn{width:44px}col.cc{width:calc(50% - 44px)}
@@ -146,11 +182,15 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;border-top:1px solid va
 <div class="toc">${toc}</div>
 ${body}
 <footer>${cfg.footer || ''}</footer>
-</div></body></html>`;
+</div>${lnScript}</body></html>`;
 
 fs.writeFileSync(OUT, html);
 const allNoteKeys = Object.keys(cfg.notes || {});
 const unused = allNoteKeys.filter((k) => !usedNotes.has(k));
+const allLineNoteKeys = Object.keys(cfg.lineNotes || {});
+const unusedLN = allLineNoteKeys.filter((k) => !usedLineNotes.has(k));
 console.log('WROTE', OUT, html.length, 'bytes');
 console.log(`notes: ${usedNotes.size}/${allNoteKeys.length} matched`);
 if (unused.length) console.log('UNUSED NOTE KEYS (typo?):', unused.join(', '));
+console.log(`lineNotes: ${usedLineNotes.size}/${allLineNoteKeys.length} matched`);
+if (unusedLN.length) console.log('UNUSED LINE-NOTE KEYS:', unusedLN.join(', '));

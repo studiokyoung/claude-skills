@@ -188,11 +188,19 @@ split diff** (left = before, right = after, changed lines highlighted). Every
 file gets a blue "what this means" box above its diff. The script does the
 rendering, the review does the writing.
 
+By default html mode also bakes a per-line **mechanic note** onto each changed
+line that carries one, revealed by a click (the calibration and the line-note
+rules are below). If the user asks for a light or quick html view (for example
+`html quick`, `html simple`, or `html 간단히`), skip `lineNotes` and render the
+lighter view without them.
+
 1. Write the config JSON to `<output path>.config.json`. The schema is defined
    by the header comment of `references/gen-splitdiff.js`. The key fields:
    `sections[]` (range groups, one per PR or per commit), `subtitle` (put the
    verdict-count line from §5 here), `notes["<sectionId>:<file path>"]` (the
-   HTML explaining what that file's change means).
+   HTML explaining what that file's change means), and
+   `lineNotes["<sectionId>:<file path>:R<new line number>"]` (the per-line
+   mechanic notes, written per the calibration and rules below).
 2. **Rules for writing notes. Someone who did not sit through the session
    reads this.** The shape of each note: (1) what changed and how (plain
    language, only code identifiers in `<code>`), (2) why it changed (what the
@@ -207,6 +215,29 @@ rendering, the review does the writing.
    `<code>` or escape it as `&lt;`. The same goes for the other two characters
    the parser owns, `>` and `&`, which become `&gt;` and `&amp;`. A JSX or HTML
    excerpt pasted raw breaks the view.
+
+### Calibrating the line notes — write to THIS reader
+
+The person reading is a design engineer who directs AI to write code and reviews the result. Pitch every line note to that reader:
+
+- **Assume** they read code fluently and own the design, UX, and product judgment — they know what the code is *supposed* to do.
+- **Fill in** the framework and language *mechanics* they steer but do not hand-write: React/Next hook lifecycle and dependency arrays, why a memo / callback / effect is shaped this way, async and promise flow, TypeScript narrowing and generics, what an API or SDK call actually does on the wire, state and re-render consequences. The test is "would they have to stop and look this up to be sure what it does?" — if yes, that is the note.
+- **Skip** design, CSS, layout, and visual styling (their home turf — explaining it is noise), and beginner boilerplate ("this declares a variable", "this imports X"). A line whose only content is theirs to own, or is trivially obvious, gets no note.
+- **One mechanic per note.** Say what the line does and the one consequence that matters — what breaks or changes without it. Two to four lines, not a lecture.
+- Language follows the same rule as the rest of the skill (the language the user is prompting in).
+
+### Line notes — the click-to-expand mechanic layer
+
+In html mode, alongside the per-file `notes`, attach a **line note** to each changed line that carries a real mechanic per the calibration above. In the config:
+
+`"lineNotes": { "<sectionId>:<path>:R<newLineNumber>": "<html>", ... }`
+
+- The key side is `R` for a right-side (added or context) line, by its **new** line number — the common case. Use `L<oldLineNumber>` only for a removed line worth explaining on the left.
+- Only changed lines get a note, and only when the calibration says there is a mechanic to fill. Most `+` lines in a hunk qualify; the trivial ones do not. Unchanged context lines almost never get one.
+- If a section has more than ~40 changed lines, note the load-bearing ones and state "explained N of M changed lines" in that file's per-file note. Never silently drop — the same rule as everywhere else in this skill.
+- The value is HTML, same escaping rule as `notes`: `<`, `>`, `&` in code must be escaped or wrapped in `<code>`.
+- After running the script, check the `lineNotes: n/m matched` line the way you check `notes`; an unused key means a typo'd line number — fix it and re-run.
+
 3. Run `node <skill directory>/references/gen-splitdiff.js <config> <output path>`,
    then **check the `notes: n/m matched` count the script prints.** If UNUSED
    NOTE KEYS appears, a typo in a path silently dropped a note, so fix it and
@@ -217,8 +248,9 @@ rendering, the review does the writing.
    self-contained. Do not add external requests (CDN, fonts, remote images) to it.
 4. Keep this mode's terminal output to three lines: the first line of §5 (the
    range plus verdict counts), the path of the file you wrote, and the one-line
-   next action. The HTML carries the full text. The file path is in the HTML,
-   so a follow-up like "why is this file like this?" still works.
+   next action. The HTML carries the full text, including the per-line mechanic
+   notes html mode bakes onto each changed line that carries one. The file path
+   is in the HTML, so a follow-up like "why is this file like this?" still works.
 
 If `html` is absent, ignore this section entirely and write no file.
 
