@@ -3,12 +3,15 @@ name: reuse-scout
 description: Pre-flight reuse scan to run BEFORE writing any new component, hook, util, or feature — inventories what the current repo ALREADY has so you extend it instead of reinventing it (AI's #1 way to ship a duplicate, buggy twin of existing code). Parses the ask into capabilities, greps components/hooks/lib/modules/app plus design tokens for real analogs by name AND behavior, and emits a REUSE MANIFEST — per capability a candidate file:line + signature + verdict (✅ reuse / 🔶 partial / ❌ genuinely new), naming the canonical impl when twins exist. Every file:line is a verified grep hit, no fabricated matches. Triggers on "build/add/create a … component/hook/util", before superpowers:brainstorming designs HOW. Not a diff gate (/explain-diff) or a bug review (/code-review).
 user-invocable: true
 argument-hint: "<feature/component to build> [write → save REUSE_MANIFEST.md]"
+metadata:
+  version: "1.1.0"
 allowed-tools:
   - Bash(rg:*)
   - Bash(grep:*)
   - Bash(find:*)
   - Bash(git grep:*)
   - Bash(git ls-files:*)
+  - Bash(node:*)
   - Read
   - Glob
   - Grep
@@ -139,3 +142,18 @@ Reuse-first plan: extend <A> + <B>; build <C> new (no analog) — <one clause ho
 - **Nothing dropped** — every §1 capability has exactly one row and one verdict.
 - **Honest verdicts** — each ❌ survived both a name and a behavior pass; no ✅
   is padding.
+
+## 7. Record the run (after you emit — always)
+
+One command, so the run ledger (`$SKILL_RUNS_DIR/reuse-scout.jsonl`, default
+`~/.claude/skill-runs/`) sees what the scan found:
+
+```
+node <skill dir>/references/record-run.mjs --skill reuse-scout --cwd <repoRoot> --json \
+  '{"ask":"<ask>","capabilities":4,"reuse":2,"partial":1,"new":1,"twins_found":1,"caught":["Footer twin at components/shell/Footer.tsx: extend, do not add a third"]}'
+```
+
+`capabilities` / `reuse` / `partial` / `new` are the manifest counts; `twins_found` counts
+capabilities with 2+ real implementations; `caught` names each reuse or twin the scan
+surfaced (one short clause each), `[]` when every row was ❌. Skipping this is a skill
+failure: an invocation with no record is exactly how a scan that never finished looks.

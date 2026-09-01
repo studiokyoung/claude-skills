@@ -3,6 +3,8 @@ name: verify
 description: Runs Kyoung's full pre-commit / pre-handoff verification gate in one command and prints an honest PASS/FAIL table. Use before committing, before handing work off, or when he says "verify", "check it", "is this safe to ship", "run the gate", and right after a change lands. Detects the stack and runs each applicable gate — git state, TypeScript typecheck, jest/vitest tests, and MULTI-VIEWPORT screenshots (mobile 390, tablet 768, desktop 1440 as viewport tiles, never a full-page shot) so below-the-fold and mobile-only breakage can't slip through. Skips a gate only with a stated reason and never reports "verified" when a step did not actually run. Not a diff-quality review (use /explain-diff) or a correctness bug hunt (use /code-review).
 user-invocable: true
 argument-hint: "[routes to shoot, e.g. / /work/corppay-app] [no-serve]"
+metadata:
+  version: "1.1.0"
 allowed-tools:
   - Bash(git status:*)
   - Bash(git log:*)
@@ -165,6 +167,37 @@ Rules:
   applicable gate is ❌ or a should-run gate was ⏭️, the verdict is "not safe".
 - Offer to `open <tempDir>` so the tiles come up for review.
 
+## 4. Mark the tree and record the run (always, last)
+
+Two commands after the table is final. They are what the skill router and the run
+ledger see; skipping them is the same failure as printing a ✅ you did not earn.
+
+1. **Marker — only when the verdict is *safe*** (every applicable gate ✅PASS, no
+   should-run gate ⏭️SKIP):
+   ```
+   node <skill dir>/references/mark-pass.mjs --root <projectRoot> \
+     --gates '{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' \
+     --routes '["/","/work/x"]'
+   ```
+   It writes `.git/verify-pass` with a fingerprint of the exact tree you verified. The
+   router's commit gate (web repos) accepts `git commit` only while the tree still
+   matches; one more edit means one more `/verify`. When the verdict is *not safe*,
+   clear any stale marker instead:
+   `node <skill dir>/references/mark-pass.mjs --root <projectRoot> --clear`
+2. **Run record — always, safe or not:**
+   ```
+   node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
+     '{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"SKIP"},"tiles":9,"routes":["/"],"duration_s":84,"caught":["tests: carousel.test.ts failed"]}'
+   ```
+   Use the table's real values. `verdict` is `safe` or `not-safe`; `gates` values are
+   `PASS` / `FAIL` / `SKIP`; `caught` lists what the gate actually stopped (a failing
+   suite, a typecheck error, a page error in the tiles) and is `[]` when everything
+   passed. The record is one appended line in `$SKILL_RUNS_DIR/verify.jsonl`
+   (default `~/.claude/skill-runs/`); it never touches the repo.
+
+Both commands print one JSON line; if either prints `"ok": false`, say so under the
+table (the gate result still stands; the bookkeeping did not).
+
 ## Verification (self-check before you report — mandatory)
 
 Before printing the table, confirm each — if any answer is no, fix the table,
@@ -179,3 +212,5 @@ do not soften it:
   `viewports` line confirms 390/768/1440), not one long full-page image?
 - If anything failed or was wrongly skipped, does the top banner say so before
   the table — no burying it in a cell?
+- Did `mark-pass.mjs` (or `--clear`) and `record-run.mjs` both run after the table? The
+  report is not finished until they did.

@@ -3,6 +3,8 @@ name: explain-diff
 description: Reviews an AI-written diff hunk by hunk before you approve it. Two axes in one table, why each change exists (evidence traced, never guessed) and whether it deserves to exist (✅ keep, ✂️ cut, 🔻 trim, ❓ ask). Use for requests like "review this diff before I approve it", "is this safe to accept?", "what did you just change, does it all belong?", and right after an AI finishes a change when the user has to decide whether to keep it. Default target is the uncommitted working tree; a ref or range in the arguments scopes it to that range. Exhaustive correctness-bug review belongs to /code-review, and style cleanup plus applying it belongs to /simplify; this skill judges whether a change earned its place and stops at the report. Pass html in the arguments, or ask for an html view or a file that reads nicely, and the same review renders as a local HTML file opened in the browser.
 user-invocable: true
 argument-hint: "[ref/range, e.g. HEAD, main..feature/x] [html for the browser view]"
+metadata:
+  version: "2.2.0"
 allowed-tools:
   - Bash(git diff:*)
   - Bash(git log:*)
