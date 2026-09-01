@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // ~/claude-skills/router/selfcheck.mjs — SessionStart hook: is the router still wired, and does it
 // still fire? Silent while everything passes; one context line naming what broke when it does not.
-//   node selfcheck.mjs --cli   → the same checks as a PASS/FAIL table, exit 1 on any failure
+//   node selfcheck.mjs --cli   → the same checks as a PASS/FAIL table, exit 1 on any failure.
+// Both paths append one `health` record (`via: "hook"` / `via: "cli"`), so a scheduled --cli run
+// fills the Health history between sessions.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -227,10 +229,14 @@ async function runChecks() {
   return { checks, ms: Date.now() - t0 };
 }
 
-function record(checks, ms) {
+function record(checks, ms, via) {
   const failures = blocking(checks);
   const rec = {
     type: 'health',
+    // Which path ran it: the SessionStart hook, or a `--cli` run (a person at a terminal, or a
+    // scheduled agent). The record is the same either way; this is what lets a report tell a
+    // session's own check apart from one a cron job made.
+    via,
     ok: failures.length === 0,
     checks: Object.fromEntries(checks.map((c) => [c.name, c.ok])),
     ms,
@@ -249,7 +255,9 @@ function record(checks, ms) {
 
 async function cli() {
   const { checks, ms } = await runChecks();
-  const failures = blocking(checks);
+  // A --cli run is a real self-check and leaves the same evidence a session's does: without this the
+  // Health history only ever fills when somebody opens a session, and a scheduled check proves nothing.
+  const failures = record(checks, ms, 'cli');
   const notes = checks.filter((c) => !c.ok && c.informational);
   const pad = Math.max(...checks.map((c) => c.name.length));
   const lines = [`router self-check · ${routerDir()} · ${process.version}`];
@@ -273,7 +281,7 @@ if (process.argv.slice(2).includes('--cli')) {
     // a missing, null, empty or unfamiliar `source` is checked, never silently passed over.
     if (input && SKIP_SOURCES.includes(input.source)) return;
     const { checks, ms } = await runChecks();
-    const failures = record(checks, ms);
+    const failures = record(checks, ms, 'hook');
     if (!failures.length) return;
     const why = failures.map((c) => `${c.name} (${c.detail})`).join('; ');
     emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: `[skill-router] self-check FAILED: ${why}. Run /skill-router status; repair with /skill-router install.` } });

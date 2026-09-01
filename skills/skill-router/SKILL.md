@@ -151,7 +151,7 @@ to go read in §4.
 | `new-file` | `remind` (context injected) or `deny-once` (first attempt denied, retry passes) |
 | `skill` | `invoke` (a tracked skill ran), `skip`, `record-failed`, `rules-load-failed` |
 | `records` | `record-failed`, `record-skipped` (the rule that decided names no skill, so there was no buffer to write to) |
-| `health` | `ok` / `fail` from the session self-check |
+| `health` | `ok` / `fail` from a self-check, the session hook and `--cli` alike (`via` says which) |
 | `rules` | `rules-load-failed` — the table did not parse, so everything was let through. The prompt and tool hooks log it under `rules`, the skill hook under `skill`, so a broken table shows up on both rows |
 
 The `why` column on a `commit` line is a fixed vocabulary. The first five are
@@ -241,7 +241,9 @@ Five types, one question each:
 | `annotation` | what did a finished run miss, appended later by `debrief`, pointing at it by `ref` |
 
 Plus one that is not a skill's: `health` lines in `<runs dir>/router.jsonl`, one
-per session self-check, which is the router's own buffer.
+per self-check, the session hook and `--cli` alike (`via` says which), which is the
+router's own buffer. A scheduled `--cli` run is how that history fills between
+sessions.
 
 Summarize the tail rather than dumping JSON walls: per line, the `ts`, the repo,
 and the one field that matters for its type. Offer the raw line if they want it.

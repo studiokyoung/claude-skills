@@ -48,6 +48,7 @@ test('every check passes: no stdout, an ok health record, an ok log line, under 
   assert.equal(recs.length, 1);
   const h = recs[0];
   assert.equal(h.type, 'health');
+  assert.equal(h.via, 'hook');
   assert.equal(h.ok, true, JSON.stringify(h.failures));
   assert.deepEqual(Object.keys(h.checks).sort(), ['node', 'probe.on-prompt', 'probe.post-skill', 'probe.pre-tool', 'rules', 'settings']);
   assert.ok(Object.values(h.checks).every(Boolean));
@@ -55,8 +56,28 @@ test('every check passes: no stdout, an ok health record, an ok log line, under 
   assert.equal(h.failures, undefined);
   // Measured at ~450ms idle (four hook spawns in parallel); the ceiling here is loose because the
   // whole suite runs its twelve files concurrently, which is not a session start.
-  assert.ok(h.ms >= 0 && h.ms < 5000, `self-check took ${h.ms}ms`);
+  // 9s, not 5s: twelve concurrent files plus npm's own parent process measured 6.2s here, and the
+  // SessionStart hook budget is 10s, so 9s is the bound that actually means something.
+  assert.ok(h.ms >= 0 && h.ms < 9000, `self-check took ${h.ms}ms`);
   assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\thealth\t-\t-\tok\t6 checks \d+ms/);
+});
+
+// A scheduled --cli run is the only thing that fills the Health history between sessions, so it has to
+// leave the same evidence a session start does, distinguishable from it and counted exactly once.
+test('--cli leaves one health record too, tagged via cli', () => {
+  const { root, env } = testEnv();
+  writeSettings(root, settingsFor(root));
+  const r = runHook('selfcheck.mjs', null, env, ['--cli']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^PASS · 6 checks · \d+ms$/m);
+  const recs = health(root);
+  assert.equal(recs.length, 1, `expected exactly one health record, got ${recs.length}`);
+  const h = recs[0];
+  assert.equal(h.type, 'health');
+  assert.equal(h.via, 'cli');
+  assert.equal(h.ok, true, JSON.stringify(h.failures));
+  assert.deepEqual(Object.keys(h.checks).sort(), ['node', 'probe.on-prompt', 'probe.post-skill', 'probe.pre-tool', 'rules', 'settings']);
+  assert.equal(h.failures, undefined);
 });
 
 test('a missing PreToolUse entry fails the settings check and names it in the context line', () => {
@@ -233,7 +254,7 @@ test('a git that fails or hangs reads as a checkout that could not be built, nev
   }
 });
 
-test('--cli prints a table, exits 0 when green and 1 when not, and writes nothing', () => {
+test('--cli prints a table, exits 0 when green and 1 when not, and records both runs', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
   const green = runHook('selfcheck.mjs', null, env, ['--cli']);
@@ -241,8 +262,10 @@ test('--cli prints a table, exits 0 when green and 1 when not, and writes nothin
   assert.match(green.stdout, /router self-check/);
   assert.match(green.stdout, /probe\.pre-tool/);
   assert.match(green.stdout, /^PASS/m);
-  assert.deepEqual(health(root), []);
-  assert.equal(fs.existsSync(path.join(root, 'state', 'router.log')), false);
+  // A --cli run is a real self-check, not a preview: it leaves the same evidence a session start
+  // does, one record per run and the log line beside it.
+  assert.deepEqual(health(root).map((h) => [h.via, h.ok]), [['cli', true]]);
+  assert.equal(fs.existsSync(path.join(root, 'state', 'router.log')), true);
 
   const s = settingsFor(root);
   delete s.hooks.PostToolUse;
@@ -251,7 +274,7 @@ test('--cli prints a table, exits 0 when green and 1 when not, and writes nothin
   assert.equal(red.status, 1);
   assert.match(red.stdout, /^FAIL/m);
   assert.match(red.stdout, /PostToolUse/);
-  assert.deepEqual(health(root), []);
+  assert.deepEqual(health(root).map((h) => [h.via, h.ok]), [['cli', true], ['cli', false]]);
 });
 
 test('a wrong hook event and a missing settings file stay fail-open', () => {

@@ -5,6 +5,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test 'router/test/*.test.mjs'"
+    "test": "node --test --test-concurrency=4 'router/test/*.test.mjs'"
   }
 }

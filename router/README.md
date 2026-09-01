@@ -330,6 +330,12 @@ settings change only takes effect in a new session anyway.
 node ~/claude-skills/router/selfcheck.mjs --cli   # the same six checks as a table, exit 1 on a blocking failure (a note exits 0)
 ```
 
+Every self-check appends one `health` record, the SessionStart hook and `--cli`
+alike, and the record carries `via: "hook"` or `via: "cli"` so a report can tell
+them apart. That is what fills the Health history between sessions: a scheduled
+`--cli` run, from a cron entry or a launchd agent, keeps the daily row coming in a
+week when nobody opened a session.
+
 `SKILL_ROUTER_SELFCHECK=0` switches it off for a session. Like every other hook
 it exits 0 no matter what happens inside it: the worst a broken self-check can do
 is fail to warn you.
@@ -407,8 +413,9 @@ way to tell whether the session predates the settings file.
   `router.log.1` at 1 MB.
 - `~/.claude/router-state/review-watermark.json`: `{"last": "<ISO>"}`, where the
   last weekly review stopped. Written only by `report.mjs --mark`.
-- `~/.claude/skill-runs/router.jsonl`: the `health` records the session self-check
-  writes. It is the router's own buffer, not a skill's.
+- `~/.claude/skill-runs/router.jsonl`: the `health` records every self-check writes,
+  the SessionStart hook and `--cli` alike (`via` says which). It is the router's own
+  buffer, not a skill's.
 - Env: `ROUTER_STATE_DIR`, `SKILL_RUNS_DIR`, `ROUTER_RULES` override the locations
   above and the rule file. The tests point the first two at temp directories, and the
   third at a temp rules file whenever a case needs a different table.
