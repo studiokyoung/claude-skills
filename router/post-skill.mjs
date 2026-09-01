@@ -12,18 +12,23 @@ failOpen(async () => {
   const skill = skillFromToolInput(input.tool_input);
   if (!skill) return;
   const { session_id, prompt_id, cwd } = input;
-  const loaded = loadRules();
   const repo = repoOf(cwd);
+  if (input.tool_response && input.tool_response.success === false) {
+    log('skill', '-', repo, 'skip', `${skill} failed`);
+    return;
+  }
+  let loaded = null;
+  try { loaded = loadRules(); } catch (e) { log('skill', '-', repo, 'rules-load-failed', e && e.message); }
   const ledger = loadLedger(session_id);
   ledger.repo = repo; ledger.cwd = cwd || null;
 
-  const typedSame = ledger.user_invoked.some((u) => u.skill === skill && u.prompt_id === (prompt_id || null));
+  const typedSame = Boolean(prompt_id) && ledger.user_invoked.some((u) => u.skill === skill && u.prompt_id === prompt_id);
   const trigger = typedSame ? 'user' : (wasReminded(ledger, skill) ? 'router' : 'model');
   ledger.skills_ran.push({ skill, prompt_id: prompt_id || null, ts: new Date().toISOString(), trigger });
   saveLedger(ledger);
+  log('skill', '-', repo, 'invoke', `${skill} ${trigger}`);
 
-  if (knownSkills(loaded).includes(skill) && trigger !== 'user') {
+  if (loaded && knownSkills(loaded).includes(skill) && trigger !== 'user') {
     appendRecord(skill, { type: 'invoke', repo, session_id, prompt_id: prompt_id || null, trigger });
   }
-  log('skill', '-', repo, 'invoke', `${skill} ${trigger}`);
 });

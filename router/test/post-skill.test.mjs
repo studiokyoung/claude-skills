@@ -49,3 +49,37 @@ test('other tools and malformed stdin: nothing happens', () => {
   assert.equal(fs.existsSync(path.join(root, 'state', 's-o.json')), false);
   assert.equal(runHook('post-skill.mjs', null, env).status, 0);
 });
+
+test('a failed Skill call is not a run: no ledger entry, no record, a skip log line', () => {
+  const { root, env } = testEnv();
+  runHook('post-skill.mjs', post({ session_id: 's-f', prompt_id: 'p1', tool_response: { success: false, error: 'denied' } }), env);
+  assert.equal(fs.existsSync(path.join(root, 'state', 's-f.json')), false);
+  assert.deepEqual(runsOf(root, 'reuse-scout'), []);
+  assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\tskill\t-\tportfolio-html\tskip\treuse-scout failed/);
+});
+
+test('missing prompt_id never produces a false user match', () => {
+  const { root, env } = testEnv();
+  runHook('on-prompt.mjs', hookInput({ hook_event_name: 'UserPromptSubmit', cwd: dir, session_id: 's-n', prompt_id: undefined, prompt: '/reuse-scout toast' }), env);
+  runHook('post-skill.mjs', post({ session_id: 's-n', prompt_id: undefined }), env);
+  assert.equal(ledgerOf(root, 's-n').skills_ran[0].trigger, 'model');
+  assert.equal(runsOf(root, 'reuse-scout').length, 2);
+});
+
+test('a record write failure still leaves the ledger and a log line', () => {
+  const { root, env } = testEnv();
+  fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'runs'), 'not a directory');
+  const r = runHook('post-skill.mjs', post({ session_id: 's-w', prompt_id: 'p1' }), env);
+  assert.equal(r.status, 0);
+  assert.equal(ledgerOf(root, 's-w').skills_ran[0].skill, 'reuse-scout');
+  assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\tinvoke\treuse-scout model/);
+});
+
+test('a broken rules file does not stop the ledger', () => {
+  const { root, env } = testEnv();
+  runHook('post-skill.mjs', post({ session_id: 's-b2', prompt_id: 'p1' }), { ...env, ROUTER_RULES: path.join(root, 'missing.json') });
+  assert.equal(ledgerOf(root, 's-b2').skills_ran[0].skill, 'reuse-scout');
+  assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /rules-load-failed/);
+  assert.deepEqual(runsOf(root, 'reuse-scout'), []);
+});
