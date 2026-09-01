@@ -51,7 +51,8 @@ intervenes.
 
 1. **Work.** Edit and stage freely. The gate only looks at commit time.
 2. **Run `/verify`.** It runs git state, typecheck, tests and three viewport
-   screenshots, prints its table, and when the verdict is *safe* it writes
+   screenshots (on a mobile app, the repo's maestro flows instead), prints its
+   table, and when the verdict is *safe* it writes
    `.git/verify-pass` with a fingerprint of the tree it just checked. A
    not-safe verdict clears the marker instead. Either way it appends one run
    record.

@@ -15,7 +15,7 @@ projects; more follow as they earn it.
 | Skill | What it is for |
 |---|---|
 | [`explain-diff`](skills/explain-diff/SKILL.md) | An approval gate for AI-written diffs. Reviews a change hunk by hunk, traces why each part exists, and gives every part a verdict, so the approve-or-not decision takes one read. |
-| [`verify`](skills/verify/SKILL.md) | The pre-commit gate as one command: git state, typecheck, tests, and viewport screenshots at 390, 768 and 1440, reported as one honest PASS/FAIL table. Never says verified for a step that did not run. |
+| [`verify`](skills/verify/SKILL.md) | The pre-commit gate as one command: git state, typecheck, tests, and viewport screenshots at 390, 768 and 1440 (a mobile app runs its maestro flows instead), reported as one honest PASS/FAIL table. Never says verified for a step that did not run. |
 | [`reuse-scout`](skills/reuse-scout/SKILL.md) | A pre-flight scan before building anything: what the repo already has for each capability, which twin is canonical, and where new code is actually justified. |
 | [`skill-router`](skills/skill-router/SKILL.md) | The operator end of the router. Says whether it is installed, which repos the commit gate covers, what the log decided and why a commit was denied, and installs or removes it behind an explicit yes. |
 | [`skill-review`](skills/skill-review/SKILL.md) | The Friday ritual. Proves the router still fires, aggregates the week's run records into one deterministic report, and turns it into proposed edits to the skills and the rule table. Proposes; never edits on its own. |
@@ -168,6 +168,9 @@ blind spot and an evidence-ladder fallback that skipped the session docs.
 
 ## Changelog
 
+- **v3.1** (2026-09-01). `verify` 1.2.0: on a mobile app the UI gate is the
+  repo's maestro flows on a booted simulator, promoted from the first field run
+  the run records captured, with that run's three traps encoded in the skill.
 - **v3** (2026-08-31). Two new skills, `verify` and `reuse-scout`, and the `router`:
   hooks that gate commits on a passing verify, remind about reuse-scout at the right
   moment, and record every skill run to a local JSONL buffer. Then the two skills
