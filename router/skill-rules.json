@@ -1,0 +1,56 @@
+{
+  "repo_groups": {
+    "web": ["portfolio-html", "studio-kyoung", "client-site-a", "client-site-b", "client-site-c"],
+    "corp": ["corp-app", "corp-dashboard", "corp-mobile", "corp-home", "corp-notifications"]
+  },
+  "docs_only": "\\.(md|mdx|txt)$|(^|/)(docs|_meta|raw)/",
+  "pretooluse_context": "additionalContext",
+  "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff"],
+  "allow_skills": ["verify", "reuse-scout"],
+  "rules": [
+    {
+      "id": "verify-commit-gate",
+      "skill": "verify",
+      "event": "pre-commit",
+      "repos": "web",
+      "mode": "block",
+      "message": "verify gate: no passing /verify for this exact tree ({why}). Run the verify skill first, then commit. Conscious override: SKIP_VERIFY=1 git commit ... (say why in the commit message)."
+    },
+    {
+      "id": "reuse-scout-prompt",
+      "skill": "reuse-scout",
+      "event": "prompt",
+      "repos": "*",
+      "mode": "remind",
+      "once_per_session": true,
+      "unless_ran": "reuse-scout",
+      "patterns": [
+        "(만들|추가|붙|짜|구현|build|add|create|implement|write|scaffold)[^\\n]{0,40}(컴포넌트|component|훅|hook|util|helper|페이지|page|화면|screen|기능|feature|모달|modal|버튼|button|폼|form)",
+        "(컴포넌트|component|훅|hook|util|helper|페이지|page|화면|screen|기능|feature|모달|modal|버튼|button|폼|form)[^\\n]{0,40}(만들|추가|붙|짜|구현|build|add|create|implement|write|scaffold)"
+      ],
+      "message": "This prompt asks to build a component/hook/util/feature. Invoke the reuse-scout skill FIRST and cite its manifest before designing or writing code: the repo probably already has part of this."
+    },
+    {
+      "id": "reuse-scout-new-file",
+      "skill": "reuse-scout",
+      "event": "new-file",
+      "repos": "*",
+      "mode": "remind",
+      "once_per_session": true,
+      "unless_ran": "reuse-scout",
+      "paths": ["(^|/)(components|hooks|lib|utils|modules|app|screens|features)/"],
+      "message": "You are creating a new file under a components/hooks/lib path and reuse-scout has not run this session. Run it first; extend the canonical existing unit if the manifest finds one."
+    },
+    {
+      "id": "save-memory-wrapup",
+      "skill": "save-memory",
+      "event": "prompt",
+      "repos": "corp",
+      "mode": "remind",
+      "once_per_session": true,
+      "unless_ran": "save-memory",
+      "patterns": ["(마감|정리하자|정리하고 끝|끝내자|끝내고|마무리|wrap.?up|오늘 여기까지|세션 끝|커밋하고 끝)"],
+      "message": "Corp session is wrapping up and save-memory has not run. Invoke it before the session ends so this session's corrections and decisions are not lost."
+    }
+  ]
+}
