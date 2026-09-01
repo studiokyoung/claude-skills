@@ -73,7 +73,9 @@ test('a record write failure still leaves the ledger and a log line', () => {
   const r = runHook('post-skill.mjs', post({ session_id: 's-w', prompt_id: 'p1' }), env);
   assert.equal(r.status, 0);
   assert.equal(ledgerOf(root, 's-w').skills_ran[0].skill, 'reuse-scout');
-  assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\tinvoke\treuse-scout model/);
+  const log = fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8');
+  assert.match(log, /\tinvoke\treuse-scout model/);
+  assert.match(log, /\tskill\t-\tportfolio-html\trecord-failed\treuse-scout/);
 });
 
 test('a broken rules file does not stop the ledger', () => {

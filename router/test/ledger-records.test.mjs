@@ -113,3 +113,24 @@ test('inferSession(null) never matches', () => {
   const r = node(`import { loadLedger, saveLedger } from './lib/ledger.mjs'; import { inferSession } from './lib/records.mjs'; saveLedger(loadLedger('fresh')); console.log(JSON.stringify([inferSession(null), inferSession(undefined)]));`, env);
   assert.deepEqual(JSON.parse(r.stdout), [null, null]);
 });
+
+test('ledger: saves are atomic and memory nulls never blank a disk value', () => {
+  const { root, env } = testEnv();
+  const r = node(`
+    import { loadLedger, saveLedger } from './lib/ledger.mjs';
+    const a = loadLedger('n1'); a.repo = 'portfolio-html'; a.cwd = '/tmp/x'; saveLedger(a);
+    const b = loadLedger('n1'); b.repo = null; b.cwd = null;
+    b.skills_ran.push({ skill: 'verify', prompt_id: 'p1', ts: 't1' }); saveLedger(b);
+    const m = loadLedger('n1');
+    console.log(JSON.stringify([m.repo, m.cwd, m.skills_ran.length]));
+  `, env);
+  assert.deepEqual(JSON.parse(r.stdout), ['portfolio-html', '/tmp/x', 1]);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'state')).filter((f) => f.includes('.tmp')), []);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'state', 'n1.json'), 'utf8')).session_id, 'n1');
+  // A torn file from a killed process is replaced by a whole one, never merged into nonsense.
+  fs.writeFileSync(path.join(root, 'state', 'n2.json'), '{"session_id":"n2","repo":"portfo');
+  node(`import { loadLedger, saveLedger } from './lib/ledger.mjs'; const l = loadLedger('n2'); l.repo = 'corp-app'; saveLedger(l);`, env);
+  const healed = JSON.parse(fs.readFileSync(path.join(root, 'state', 'n2.json'), 'utf8'));
+  assert.equal(healed.repo, 'corp-app');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'state')).filter((f) => f.includes('.tmp')), []);
+});

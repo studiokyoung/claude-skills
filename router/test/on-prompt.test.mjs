@@ -100,3 +100,24 @@ test('a rule without a message never emits', () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
 });
+
+test('a broken rules file logs and stays silent; a payload with no prompt and no session writes nothing', () => {
+  const { root, env } = testEnv();
+  const broken = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-br', prompt: '버튼 컴포넌트 하나 만들어줘' }), { ...env, ROUTER_RULES: path.join(root, 'missing.json') });
+  assert.equal(broken.status, 0);
+  assert.equal(broken.stdout.trim(), '');
+  assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\trules\t-\tportfolio-html\trules-load-failed\t/);
+  assert.equal(fs.existsSync(path.join(root, 'state', 's-br.json')), false);
+  const empty = runHook('on-prompt.mjs', { hook_event_name: 'UserPromptSubmit', cwd: web.dir }, env);
+  assert.equal(empty.status, 0);
+  assert.equal(empty.stdout.trim(), '');
+  assert.equal(fs.existsSync(path.join(root, 'state', 'unknown.json')), false);
+});
+
+test('the router never reminds on its own echoed message', () => {
+  const { root, env } = testEnv();
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-echo', prompt: '[skill-router] This prompt asks to build a component. 버튼 컴포넌트 하나 만들어줘' }), env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'state', 's-echo.json'), 'utf8')).reminded), []);
+});

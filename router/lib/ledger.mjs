@@ -27,7 +27,11 @@ export function loadLedger(sessionId) {
 function mergeLedgers(disk, mem) {
   const key = (e) => `${e && e.skill}|${(e && e.prompt_id) ?? ''}|${(e && e.ts) ?? ''}`;
   const union = (a, b) => { const seen = new Set(); return [...arr(a), ...arr(b)].filter((e) => { const k = key(e); if (seen.has(k)) return false; seen.add(k); return true; }); };
-  return { ...disk, ...mem, reminded: { ...obj(disk.reminded), ...obj(mem.reminded) }, user_invoked: union(disk.user_invoked, mem.user_invoked), skills_ran: union(disk.skills_ran, mem.skills_ran) };
+  const scalars = { ...disk, ...mem };
+  // A hook that could not resolve the repo (or carries no cwd) must not blank what another hook
+  // already learned: memory's nulls never overwrite a disk value.
+  for (const k of Object.keys(mem)) if (mem[k] == null && disk[k] != null) scalars[k] = disk[k];
+  return { ...scalars, reminded: { ...obj(disk.reminded), ...obj(mem.reminded) }, user_invoked: union(disk.user_invoked, mem.user_invoked), skills_ran: union(disk.skills_ran, mem.skills_ran) };
 }
 
 export function saveLedger(ledger) {
@@ -36,7 +40,12 @@ export function saveLedger(ledger) {
   let disk = null;
   try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   const merged = disk && typeof disk === 'object' && !Array.isArray(disk) ? mergeLedgers(disk, ledger) : ledger;
-  fs.writeFileSync(file, JSON.stringify(merged));
+  // Write then rename: a killed process (or an overlapping hook) can leave a stale temp file, but
+  // never a half-written ledger that the next load has to throw away. The pid keeps two hooks
+  // writing at once off each other's temp file.
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(merged));
+  fs.renameSync(tmp, file);
   prune();
 }
 
@@ -53,7 +62,7 @@ export function prune(maxAgeDays = 7) {
     const dir = stateDir();
     const cutoff = Date.now() - maxAgeDays * 864e5;
     for (const f of fs.readdirSync(dir)) {
-      if (!f.endsWith('.json')) continue;
+      if (!f.endsWith('.json') && !f.endsWith('.tmp')) continue;
       const p = path.join(dir, f);
       try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch {}
     }

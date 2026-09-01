@@ -10,8 +10,12 @@ failOpen(async () => {
   const input = await readStdin();
   if (!input || (input.hook_event_name && input.hook_event_name !== 'UserPromptSubmit')) return;
   const { session_id, prompt_id, cwd, prompt } = input;
-  const loaded = loadRules();
+  // Neither text to match nor a session to key a ledger by: not a prompt this hook can act on.
+  if (prompt === undefined && session_id === undefined) return;
   const repo = repoOf(cwd);
+  // A broken/missing rules file must stay fail-open, but not silently: leave a trace.
+  let loaded;
+  try { loaded = loadRules(); } catch (e) { log('rules', '-', repo, 'rules-load-failed', e && e.message); return; }
   const ledger = loadLedger(session_id);
   ledger.repo = repo;
   ledger.cwd = cwd || null;
@@ -21,12 +25,16 @@ failOpen(async () => {
   if (typed) {
     ledger.user_invoked.push({ skill: typed, prompt_id: prompt_id || null, ts: now });
     saveLedger(ledger);
-    appendRecord(typed, { type: 'invoke', repo, session_id, prompt_id: prompt_id || null, trigger: 'user' });
+    // Logged before the record: a failing append must not also lose the trace of the invocation.
     log('prompt', '-', repo, 'user-invoked', typed);
+    appendRecord(typed, { type: 'invoke', repo, session_id, prompt_id: prompt_id || null, trigger: 'user' });
     return;
   }
 
-  const { messages, fired } = planReminders(loaded, ledger, repo, prompt);
+  // The reminder is injected as context and comes back inside the next payload the hook sees.
+  // Matching our own words would re-fire the rules that wrote them.
+  const echo = String(prompt || '').includes('[skill-router]');
+  const { messages, fired } = echo ? { messages: [], fired: [] } : planReminders(loaded, ledger, repo, prompt);
   for (const f of fired) ledger.reminded[f.ruleId] = { skill: f.skill, prompt_id: prompt_id || null, ts: now };
   saveLedger(ledger);
   for (const f of fired) log('prompt', f.ruleId, repo, 'remind');

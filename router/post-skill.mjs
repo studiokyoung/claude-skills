@@ -29,6 +29,8 @@ failOpen(async () => {
   log('skill', '-', repo, 'invoke', `${skill} ${trigger}`);
 
   if (loaded && knownSkills(loaded).includes(skill) && trigger !== 'user') {
-    appendRecord(skill, { type: 'invoke', repo, session_id, prompt_id: prompt_id || null, trigger });
+    // The ledger is already saved; a failing record buffer must leave a trace, not an exception.
+    try { appendRecord(skill, { type: 'invoke', repo, session_id, prompt_id: prompt_id || null, trigger }); }
+    catch { log('skill', '-', repo, 'record-failed', skill); }
   }
 });
