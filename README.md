@@ -64,8 +64,10 @@ node ~/claude-skills/router/install.mjs
 It adds four hooks, four allow rules, and one env var to `~/.claude/settings.json`
 (a backup is written first) and can be removed with `--uninstall`. Before that
 first run, put your own repository names in `repo_groups` in
-`router/skill-rules.json`: the `web` group is where the commit gate applies, and
-mine are in there by default. Details in [router/README.md](router/README.md).
+`router/skill-rules.json`: it ships empty, so the `web` group, where the commit
+gate applies, covers nothing until you fill it in. A gitignored
+`router/skill-rules.local.json` beside it does the same job and keeps the names
+out of git. Details in [router/README.md](router/README.md).
 
 To try the whole repo without installing anything, point one session at the
 checkout:

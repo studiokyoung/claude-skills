@@ -4,10 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { routerDir, tmpDir, testEnv, makeRepo } from './helpers.mjs';
-import { loadRules } from '../lib/rules.mjs';
+import { routerDir, tmpDir, testEnv, makeRepo, shippedRules, FIXTURE_GROUPS } from './helpers.mjs';
 
-const loaded = loadRules();
+const loaded = shippedRules();
 const status = (env, args = []) => {
   const r = spawnSync('node', [path.join(routerDir, 'status.mjs'), ...args], { encoding: 'utf8', env, timeout: 20000 });
   let json = null;
@@ -53,22 +52,47 @@ test('settings: the four entries, whose checkout they run from, the allow rules,
   assert.equal(j.router_dir, routerDir);
 });
 
-test('rules: the groups and one row per rule, straight from the table', () => {
+test('rules: the merged groups and one row per rule, with the override that supplied them named', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
   const j = status(env, ['--json']).json;
   assert.equal(j.rules.ok, true);
-  assert.deepEqual(j.rules.repo_groups.web, loaded.repoGroups.web);
+  // The shipped table names no repositories; what the card prints is the merged view.
+  assert.deepEqual(loaded.repoGroups.web, []);
+  assert.deepEqual(j.rules.repo_groups.web, FIXTURE_GROUPS.web);
+  assert.deepEqual(j.rules.local, { path: path.join(root, 'skill-rules.local.json'), active: true, groups: ['web', 'corp'], error: null });
   assert.deepEqual(j.rules.rules.map((r) => r.id), loaded.rules.map((r) => r.id));
   const gate = j.rules.rules.find((r) => r.id === 'verify-commit-gate');
   assert.deepEqual(gate, { id: 'verify-commit-gate', skill: 'verify', event: 'pre-commit', repos: 'web', mode: 'block' });
   assert.equal(j.rules.pretooluse_context, 'additionalContext');
+  assert.match(status(env, ['--md']).stdout, new RegExp(`local +${path.join(root, 'skill-rules.local.json')} · overrides repo_groups web, corp`));
+});
+
+test('no override, and an override that will not parse, are both said out loud', () => {
+  const none = testEnv();
+  writeSettings(none.root, settingsFor(none.root));
+  fs.rmSync(path.join(none.root, 'skill-rules.local.json'));
+  const j = status(none.env, ['--json']).json;
+  assert.equal(j.rules.local.active, false);
+  assert.equal(j.rules.local.error, null);
+  assert.deepEqual(j.rules.repo_groups, { web: [], corp: [] });
+  assert.match(status(none.env, ['--md']).stdout, /local +none \(/);
+  assert.match(status(none.env, ['--md']).stdout, /web: \(empty\)/);
+
+  const torn = testEnv();
+  writeSettings(torn.root, settingsFor(torn.root));
+  fs.writeFileSync(path.join(torn.root, 'skill-rules.local.json'), '{ not json');
+  const broken = status(torn.env, ['--json']).json;
+  assert.equal(broken.rules.ok, true, 'the base table still loads');
+  assert.equal(broken.rules.local.active, false);
+  assert.match(broken.rules.local.error, /skill-rules\.local\.json: /);
+  assert.match(status(torn.env, ['--md']).stdout, /local +IGNORED · .*skill-rules\.local\.json/);
 });
 
 test('this repo: a gated repo, its marker, and a linked worktree keeping the gate but not the marker', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
-  const gated = loaded.repoGroups.web[0];
+  const gated = FIXTURE_GROUPS.web[0];
   const { dir, git } = makeRepo(gated, { 'web/app/page.tsx': 'x' });
   const main = status(env, ['--json', '--cwd', dir]).json.repo;
   assert.equal(main.name, gated);
@@ -151,7 +175,7 @@ test('records: line counts and type counts per file, and no records yet when the
 test('the md card carries every section and always the session-start caveat, and writes nothing', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
-  const { dir } = makeRepo(loaded.repoGroups.web[0], { 'web/app/page.tsx': 'x' });
+  const { dir } = makeRepo(FIXTURE_GROUPS.web[0], { 'web/app/page.tsx': 'x' });
   const r = status(env, ['--md', '--cwd', dir]);
   assert.equal(r.status, 0, r.stderr);
   for (const section of ['settings', 'rules', 'repo', 'log', 'records', 'caveats']) assert.match(r.stdout, new RegExp(`^${section}`, 'm'));

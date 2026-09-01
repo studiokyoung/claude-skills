@@ -187,9 +187,12 @@ How to read a row: `event` is when it is checked (`prompt`, `pre-commit`,
 asks for and whose record buffer it writes into.
 
 **Add a repo to the gate:** append its directory name to `repo_groups.web` in
-`~/claude-skills/router/skill-rules.json` (the `corp` group is the save-memory
-reminder's scope). The name is the repository root's basename, so a linked
-worktree needs no separate entry.
+`~/claude-skills/router/skill-rules.local.json`, the gitignored override that
+holds this machine's real repository names (on a setup with no override, the same
+key in `skill-rules.json`, which ships empty). The `corp` group is the
+save-memory reminder's scope. The name is the repository root's basename, so a
+linked worktree needs no separate entry. The status card's `rules` block names
+which file supplied the groups.
 
 **Add a rule:** one object in `rules`, plus a matching sentence and a near-miss
 that must *not* match in `router/test/rules.test.mjs`. No script change.

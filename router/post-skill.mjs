@@ -19,6 +19,7 @@ failOpen(async () => {
   }
   let loaded = null;
   try { loaded = loadRules(); } catch (e) { log('skill', '-', repo, 'rules-load-failed', e && e.message); }
+  if (loaded && loaded.localError) log('skill', '-', repo, 'rules-load-failed', loaded.localError);
   const ledger = loadLedger(session_id);
   ledger.repo = repo; ledger.cwd = cwd || null;
 

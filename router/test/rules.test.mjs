@@ -1,15 +1,31 @@
 // ~/claude-skills/router/test/rules.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
-import { loadRules, repoOf, inScope, rulesFor, matchPrompt, matchPromptIndex, matchPath, knownSkills } from '../lib/rules.mjs';
-import { makeRepo, tmpDir } from './helpers.mjs';
+import { loadRules, localRulesPath, repoOf, inScope, rulesFor, matchPrompt, matchPromptIndex, matchPath, knownSkills } from '../lib/rules.mjs';
+import { FIXTURE_GROUPS, makeRepo, routerDir, shippedRules, tmpDir } from './helpers.mjs';
 
 delete process.env.ROUTER_RULES;
-const loaded = loadRules();
+const loaded = shippedRules();
+
+// A scratch copy of the shipped table, optionally mutated, with an override beside it: the two-file
+// arrangement every installed machine reads. `local` may be a string, which is how a broken one is
+// written. Omit it for base-only.
+function scratchRules(local, mutate) {
+  const dir = tmpDir('rules-');
+  const base = JSON.parse(fs.readFileSync(path.join(routerDir, 'skill-rules.json'), 'utf8'));
+  if (mutate) mutate(base);
+  const file = path.join(dir, 'skill-rules.json');
+  fs.writeFileSync(file, JSON.stringify(base));
+  if (local !== undefined) fs.writeFileSync(localRulesPath(file), typeof local === 'string' ? local : JSON.stringify(local));
+  return loadRules(file);
+}
 
 test('rule table loads with compiled patterns and the top-level keys', () => {
-  assert.ok(loaded.repoGroups.web.includes('portfolio-html'));
+  // The public table names no repositories: they are the one thing that has to come from the machine.
+  assert.deepEqual(loaded.repoGroups, { web: [], corp: [] });
+  assert.equal(loaded.localOverride, false);
   assert.ok(loaded.docsOnly instanceof RegExp);
   assert.ok(['additionalContext', 'deny-once'].includes(loaded.preToolUseContext));
   assert.deepEqual(knownSkills(loaded).sort(), ['explain-diff', 'reuse-scout', 'save-memory', 'skill-review', 'skill-router', 'verify']);
@@ -27,17 +43,21 @@ test('repoOf returns the basename of the git toplevel, null outside git', () => 
 });
 
 test('scope: groups, star, explicit list, non-git', () => {
-  const gate = loaded.rules.find((x) => x.id === 'verify-commit-gate');
-  assert.equal(inScope(gate, 'portfolio-html', loaded.repoGroups), true);
-  assert.equal(inScope(gate, 'Self-GraphDB', loaded.repoGroups), false);
-  assert.equal(inScope(gate, null, loaded.repoGroups), false);
-  const star = loaded.rules.find((x) => x.id === 'reuse-scout-prompt');
-  assert.equal(inScope(star, null, loaded.repoGroups), true);
-  assert.equal(inScope({ repos: ['corp-app'] }, 'corp-app', loaded.repoGroups), true);
-  assert.equal(inScope({ repos: ['corp-app'] }, 'corp-mobile', loaded.repoGroups), false);
-  assert.deepEqual(rulesFor(loaded, 'prompt', 'corp-mobile').map((r) => r.id).sort(), ['reuse-scout-prompt', 'save-memory-wrapup']);
-  assert.deepEqual(rulesFor(loaded, 'prompt', 'portfolio-html').map((r) => r.id), ['reuse-scout-prompt']);
-  assert.deepEqual(rulesFor(loaded, 'pre-commit', 'Self-GraphDB'), []);
+  // Scope is what the override buys, so it is judged on a merged table, never on the empty shipped one.
+  const merged = scratchRules({ repo_groups: FIXTURE_GROUPS });
+  const gate = merged.rules.find((x) => x.id === 'verify-commit-gate');
+  assert.equal(inScope(gate, 'portfolio-html', merged.repoGroups), true);
+  assert.equal(inScope(gate, 'Self-GraphDB', merged.repoGroups), false);
+  assert.equal(inScope(gate, null, merged.repoGroups), false);
+  // The same rule against the table as it ships: no names, so nothing is gated until a machine says so.
+  assert.equal(inScope(gate, 'portfolio-html', loaded.repoGroups), false);
+  const star = merged.rules.find((x) => x.id === 'reuse-scout-prompt');
+  assert.equal(inScope(star, null, merged.repoGroups), true);
+  assert.equal(inScope({ repos: ['corp-app'] }, 'corp-app', merged.repoGroups), true);
+  assert.equal(inScope({ repos: ['corp-app'] }, 'corp-mobile', merged.repoGroups), false);
+  assert.deepEqual(rulesFor(merged, 'prompt', 'corp-mobile').map((r) => r.id).sort(), ['reuse-scout-prompt', 'save-memory-wrapup']);
+  assert.deepEqual(rulesFor(merged, 'prompt', 'portfolio-html').map((r) => r.id), ['reuse-scout-prompt']);
+  assert.deepEqual(rulesFor(merged, 'pre-commit', 'Self-GraphDB'), []);
 });
 
 test('prompt patterns: Korean noun-first, English verb-first, and non-matches', () => {
@@ -117,4 +137,65 @@ test('the probe sample rides with the rule and must still match it', () => {
   // The self-check sends this sentence through the real hook, so a pattern edit that stops matching
   // it has to fail here, in the suite, rather than at somebody's next session start.
   assert.ok(matchPromptIndex(r, r.sample) >= 0, 'the sample must match the rule it probes');
+});
+
+test('a local override replaces per key and per group, keeps the groups only the base has, and adds its own', () => {
+  const merged = scratchRules(
+    { repo_groups: { web: ['only-web'], extra: ['x'] }, track_skills: ['verify'] },
+    (base) => { base.repo_groups = { web: ['base-web'], corp: ['base-corp'] }; },
+  );
+  assert.deepEqual(merged.repoGroups, { web: ['only-web'], corp: ['base-corp'], extra: ['x'] });
+  assert.deepEqual(merged.trackSkills, ['verify']);
+  // A key the local does not name is the base's, untouched.
+  assert.deepEqual(merged.allowSkills, loaded.allowSkills);
+  assert.equal(merged.localOverride, true);
+  assert.deepEqual(merged.localGroups, ['web', 'extra']);
+  assert.equal(merged.localError, null);
+  assert.equal(merged.localPath, path.join(path.dirname(merged.localPath), 'skill-rules.local.json'));
+});
+
+test('rules merge by id: a matching id replaces in place, a new one appends, both compiled', () => {
+  const merged = scratchRules({
+    rules: [
+      { id: 'verify-commit-gate', skill: 'verify', event: 'pre-commit', repos: 'web', mode: 'block', message: 'local gate' },
+      { id: 'local-only', skill: 'verify', event: 'prompt', repos: '*', mode: 'remind', patterns: ['zzlocal-zz'], message: 'local rule' },
+    ],
+  });
+  assert.deepEqual(merged.rules.map((r) => r.id), [...loaded.rules.map((r) => r.id), 'local-only']);
+  assert.equal(merged.rules.find((r) => r.id === 'verify-commit-gate').message, 'local gate');
+  // The appended rule went through the same compile step as the shipped ones, patterns and all.
+  const added = merged.rules.at(-1);
+  assert.ok(added._patterns[0] instanceof RegExp);
+  assert.equal(matchPrompt(added, 'zzlocal-zz'), true);
+});
+
+test('no local file beside the table is base-only, and the table says so', () => {
+  const only = scratchRules();
+  assert.equal(only.localOverride, false);
+  assert.deepEqual(only.localGroups, []);
+  assert.equal(only.localError, null);
+  assert.deepEqual(only.repoGroups, { web: [], corp: [] });
+  assert.deepEqual(only.rules.map((r) => r.id), loaded.rules.map((r) => r.id));
+});
+
+test('a local override that does not parse falls back to base-only and names the file', () => {
+  for (const [label, text] of [['torn json', '{ not json'], ['not an object', '["web"]']]) {
+    const broken = scratchRules(text);
+    assert.equal(broken.localOverride, false, label);
+    assert.deepEqual(broken.repoGroups, { web: [], corp: [] }, label);
+    assert.deepEqual(broken.rules.map((r) => r.id), loaded.rules.map((r) => r.id), label);
+    assert.match(broken.localError, /skill-rules\.local\.json: /, label);
+  }
+});
+
+// The override reaches the router through a symlink, so a moved target reads as ENOENT: absent, and
+// every repo named only in that file would go quietly ungated. It is a broken local, and says so.
+test('a local override that is a dangling symlink is broken, not absent', () => {
+  const dir = tmpDir('rules-');
+  const file = path.join(dir, 'skill-rules.json');
+  fs.copyFileSync(path.join(routerDir, 'skill-rules.json'), file);
+  fs.symlinkSync(path.join(dir, 'gone.json'), localRulesPath(file));
+  const loadedLink = loadRules(file);
+  assert.equal(loadedLink.localOverride, false);
+  assert.match(loadedLink.localError, /skill-rules\.local\.json: broken symlink/);
 });

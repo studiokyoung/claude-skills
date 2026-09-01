@@ -17,6 +17,8 @@ failOpen(async () => {
   // A broken/missing rules file must stay fail-open, but not silently: leave a trace.
   let loaded;
   try { loaded = loadRules(); } catch (e) { log('rules', '-', null, 'rules-load-failed', e.message); return; }
+  // A local override that will not parse leaves a working table (the base) and one trace, never silence.
+  if (loaded.localError) log('rules', '-', null, 'rules-load-failed', loaded.localError);
 
   let targets = [];
   if (tool_name === 'Bash') {

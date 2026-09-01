@@ -36,9 +36,12 @@ this file is the reference.
 
 ## Install
 
-First make the rules yours: open `router/skill-rules.json` and replace the
-repository names under `repo_groups` with your own (the `web` group is where the
-commit gate applies, the `corp` group is where the save-memory reminder does).
+First make the rules yours. `repo_groups` ships empty, so nothing is gated until
+you say what to gate: put your repository names either straight into
+`router/skill-rules.json`, or into a gitignored `router/skill-rules.local.json`
+beside it ([Keeping your repository names out of
+git](#keeping-your-repository-names-out-of-git)). The `web` group is where the
+commit gate applies, the `corp` group is where the save-memory reminder does.
 Then:
 
 ```bash
@@ -83,7 +86,7 @@ version.
 
 ```json
 {
-  "repo_groups": { "web": ["portfolio-html"], "corp": ["corp-app"] },
+  "repo_groups": { "web": ["your-portfolio"], "corp": ["your-app"] },
   "docs_only": "\\.(md|mdx|txt|markdown)$",
   "pretooluse_context": "additionalContext",
   "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff", "skill-router", "skill-review"],
@@ -131,6 +134,31 @@ The patterns are deliberately narrow, because a reminder on the wrong prompt is
 worse than no reminder. The English verbs and nouns are word-bounded, `build` and
 `rebuild` are both matched but guarded, so "the build is broken" does not match,
 `추가` does not match `추가로` or `추가적`, and `마감` does not match `마감일`.
+
+### Keeping your repository names out of git
+
+`repo_groups` ships empty on purpose: the public table carries no repository
+names, and the gate covers nothing until somebody adds their own. Add them to
+`skill-rules.json` directly for a setup that can be public, or keep them private
+in a `skill-rules.local.json` beside it, which this repo gitignores:
+
+```json
+{ "repo_groups": { "web": ["your-portfolio", "client-site-a"] } }
+```
+
+The two files are merged at load. `repo_groups` merges per group: a local `web`
+replaces the base `web`, a group only the base has survives, a group only the
+local has is added. `rules` merges per `id`: a local rule whose id matches
+replaces that rule, a new id is appended. `docs_only`, `pretooluse_context`,
+`track_skills` and `allow_skills` are replaced outright when the local file names
+them. Everything else is the base file, so an override can carry one private
+group without restating the table.
+
+A local file that does not parse costs the override and never the rules: the base
+table loads alone, each hook logs one `rules-load-failed` line naming the local
+file, and the session self-check fails its `rules` check until it is fixed, since
+a broken override silently ungates every repository whose name lived only in it.
+`node status.mjs` prints which file supplied the groups.
 
 ### Adding a rule
 
@@ -430,7 +458,9 @@ way to tell whether the session predates the settings file.
   marks a process as one of its probes, which also skips it.
 - Every hook script exits 0 no matter what happens inside it. A bug can only switch
   the router off; it cannot break a session. A missing or unparseable rules file logs
-  `rules-load-failed` and lets the call through. The test suite is the canary.
+  `rules-load-failed` and lets the call through; an unparseable
+  `skill-rules.local.json` logs the same line and falls back to the base table. The
+  test suite is the canary.
 
 ## Tests
 

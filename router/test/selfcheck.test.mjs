@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { routerDir, tmpDir, testEnv, runHook, hookInput } from './helpers.mjs';
-import { loadRules } from '../lib/rules.mjs';
+import { routerDir, tmpDir, testEnv, runHook, hookInput, shippedRules } from './helpers.mjs';
 
-const loaded = loadRules();
+const loaded = shippedRules();
+// testEnv writes the scratch override every env starts with; a case that wants a different one
+// (broken, empty, or naming another repo) writes over it before the check runs.
+const writeLocal = (root, text) => fs.writeFileSync(path.join(root, 'skill-rules.local.json'), typeof text === 'string' ? text : JSON.stringify(text));
 const start = (over = {}) => hookInput({ hook_event_name: 'SessionStart', source: 'startup', ...over });
 
 // A settings file in the shape the installer writes, so a check that fails has one cause: the mutation.
@@ -290,4 +292,48 @@ test('a wrong hook event and a missing settings file stay fail-open', () => {
   assert.equal(r.status, 0);
   assert.match(context(r), /settings/);
   assert.equal(health(bare.root).at(-1).checks.settings, false);
+});
+
+// The one failure mode the override adds: the table still loads, so nothing is loud, while every
+// repo whose name lives only in that file is silently ungated. The daily --cli alarm has to catch it.
+test('a local override that does not parse fails the rules check and names the file', () => {
+  const { root, env } = testEnv();
+  writeSettings(root, settingsFor(root));
+  writeLocal(root, '{ not json');
+  const r = runHook('selfcheck.mjs', start(), env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(context(r), /skill-rules\.local\.json/);
+  const h = health(root).at(-1);
+  assert.equal(h.ok, false);
+  assert.equal(h.checks.rules, false);
+  assert.ok(h.failures.some((f) => f.check === 'rules' && /skill-rules\.local\.json/.test(f.reason) && f.informational === false));
+});
+
+// A fresh public checkout gates nothing until its owner adds names. Nothing is broken, so the gate
+// probe says so and stands aside; a failure here would cry wolf on every first install.
+test('an empty merged gate group is an informational note, never a failure', () => {
+  const { root, env } = testEnv();
+  writeSettings(root, settingsFor(root));
+  writeLocal(root, { repo_groups: { web: [], corp: [] } });
+  const r = runHook('selfcheck.mjs', null, env, ['--cli']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /⚠️ probe\.pre-tool\s+no gated repos configured; commit-gate probe skipped/);
+  assert.match(r.stdout, /^PASS · 6 checks · \d+ms · 1 note$/m);
+  const h = health(root).at(-1);
+  assert.equal(h.ok, true);
+  assert.equal(h.checks['probe.pre-tool'], false);
+  assert.ok(h.failures.some((f) => f.check === 'probe.pre-tool' && f.informational === true));
+});
+
+// The probe hardcodes no repository name: it stages whatever the merged table gates first, so the
+// same check proves the gate on a machine whose names the shipped table has never heard of.
+test('the gate probe stages the repo the merged table names, and the card says the override is on', () => {
+  const { root, env } = testEnv();
+  writeSettings(root, settingsFor(root));
+  writeLocal(root, { repo_groups: { web: ['scratch-gate-repo'], corp: [] } });
+  const r = runHook('selfcheck.mjs', null, env, ['--cli']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /probe\.pre-tool\s+new-file reminder \+ commit deny in scratch-gate-repo/);
+  assert.match(r.stdout, /rules\s+4 rules, 2 groups, additionalContext · local override \(web, corp\)/);
+  assert.match(r.stdout, /^PASS/m);
 });

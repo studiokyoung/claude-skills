@@ -1,3 +1,6 @@
 .DS_Store
 node_modules/
 *.log
+
+# machine-local rule table: the repository names the gate covers here
+router/skill-rules.local.json

@@ -42,10 +42,11 @@ verify"는 기억이 아니라 기계가 강제해야 한다. 그리고 스킬�
 
 ### 2.1 게이트 레포에서 커밋하기
 
-적용 레포(`repo_groups.web`): `portfolio-html`, `studio-kyoung`,
-`client-site-a`, `client-site-b`, `client-site-c`. 그 외
-(Self-GraphDB, claude-skills, Corp 레포들)에선 커밋 게이트가 아예 개입하지
-않는다.
+적용 레포는 `repo_groups.web`에 적힌 이름들이다 (예: `your-portfolio`,
+`client-site-a`). 이 그룹은 빈 채로 배포되니 `skill-rules.json`에 직접 적거나,
+이름을 git에 남기고 싶지 않으면 옆에 둔 gitignore된 `skill-rules.local.json`에
+적는다 (둘은 로드 시점에 병합된다. [../README.md](../README.md)의 룰 테이블 절
+참고). 그 외 레포에선 커밋 게이트가 아예 개입하지 않는다.
 
 1. **작업한다.** 편집도 스테이징도 자유. 게이트는 커밋 순간에만 본다.
 2. **`/verify`를 돌린다.** git 상태 → 타입체크 → 테스트 → 3뷰포트 스크린샷
@@ -555,8 +556,10 @@ pathspec이 레포 밖으로 새지 않는다.
 ~/claude-skills/router/
   skill-rules.json      정책: repo_groups · docs_only · pretooluse_context
                         · track_skills · allow_skills · rules[]
+  skill-rules.local.json  선택, gitignore됨: 같은 키를 위 테이블에 병합
+                        (그룹 단위 · 룰 id 단위)
   on-prompt.mjs         UserPromptSubmit: 타이핑 스킬 invoke 기록,
-                        프롬프트 리마인드, 자기-에코 가드
+                        프롬프트 리마인드, 자기-에코 · 하네스 턴 가드
   pre-tool.mjs          PreToolUse Bash|Write: 커밋 게이트, 새 파일 백스톱
   post-skill.mjs        PostToolUse Skill: 원장, 트리거 분류, invoke 기록
   selfcheck.mjs         SessionStart: 체크 6개, health 기록, --cli

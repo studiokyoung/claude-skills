@@ -21,6 +21,8 @@ failOpen(async () => {
   // A broken/missing rules file must stay fail-open, but not silently: leave a trace.
   let loaded;
   try { loaded = loadRules(); } catch (e) { log('rules', '-', repo, 'rules-load-failed', e && e.message); return; }
+  // A local override that will not parse leaves a working table (the base) and one trace, never silence.
+  if (loaded.localError) log('rules', '-', repo, 'rules-load-failed', loaded.localError);
   const ledger = loadLedger(session_id);
   ledger.repo = repo;
   ledger.cwd = cwd || null;

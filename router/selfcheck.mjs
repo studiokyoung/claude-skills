@@ -55,14 +55,12 @@ function checkSettings(loaded) {
 
 function checkRules() {
   let loaded;
-  let raw;
-  try {
-    loaded = loadRules();
-    raw = JSON.parse(fs.readFileSync(rulesPath(), 'utf8'));
-  } catch (e) {
-    return { result: fail('rules', `${rulesPath()}: ${e.message}`), loaded: null };
-  }
+  try { loaded = loadRules(); }
+  catch (e) { return { result: fail('rules', `${rulesPath()}: ${e.message}`), loaded: null }; }
   const problems = [];
+  // A local override that will not parse is the quiet failure this check exists for: the table still
+  // loads, so nothing breaks loudly, while every repo whose name lives only in that file is ungated.
+  if (loaded.localError) problems.push(`local override ignored: ${loaded.localError}`);
   for (const r of loaded.rules) {
     if ((r.event === 'prompt' || r.event === 'new-file') && !String(r.message || '').trim()) problems.push(`${r.id}: no message, so it can never fire`);
     // It would still deny, but with no skill there is no buffer to write the gate record into, and
@@ -71,10 +69,11 @@ function checkRules() {
     const scope = r.repos ?? '*';
     if (typeof scope === 'string' && scope !== '*' && !(scope in loaded.repoGroups)) problems.push(`${r.id}: repo group "${scope}" is not in repo_groups`);
   }
-  if (!['additionalContext', 'deny-once'].includes(raw.pretooluse_context)) problems.push(`pretooluse_context "${raw.pretooluse_context}" is neither additionalContext nor deny-once`);
+  if (!['additionalContext', 'deny-once'].includes(loaded.preToolUseContextRaw)) problems.push(`pretooluse_context "${loaded.preToolUseContextRaw}" is neither additionalContext nor deny-once`);
+  const source = loaded.localOverride ? ` · local override (${loaded.localGroups.join(', ') || 'no groups'})` : '';
   const result = problems.length
     ? fail('rules', problems.join('; '))
-    : pass('rules', `${loaded.rules.length} rules, ${Object.keys(loaded.repoGroups).length} groups, ${loaded.preToolUseContext}`);
+    : pass('rules', `${loaded.rules.length} rules, ${Object.keys(loaded.repoGroups).length} groups, ${loaded.preToolUseContext}${source}`);
   return { result, loaded };
 }
 
@@ -126,12 +125,15 @@ function spawnHook(script, payload, env) {
 // rule table beside the patterns it exercises, never hand-written here.
 const sampleRule = (loaded) => loaded.rules.find((r) => r.event === 'prompt' && (r.repos ?? '*') === '*' && String(r.sample || '').trim());
 
-function gateRepoName(loaded) {
+// The name the gate probe stages, taken from the merged table rather than any string in here: the
+// shipped table lists no repositories, so on this machine the name comes from the local override and
+// on a fresh checkout there is none to take.
+function gateRepo(loaded) {
   const rule = loaded.rules.find((r) => r.event === 'pre-commit' && r.mode === 'block');
-  if (!rule) return null;
+  if (!rule) return { rule: null, name: null };
   const scope = rule.repos ?? '*';
   const list = Array.isArray(scope) ? scope : (loaded.repoGroups[scope] || []);
-  return list[0] || null;
+  return { rule, name: list[0] || null };
 }
 
 // A throwaway checkout named after a gated repo, with one staged .tsx so the commit the gate sees
@@ -156,7 +158,7 @@ function stageGateRepo(root, name) {
 
 async function runProbes(loaded, env, root) {
   const rule = sampleRule(loaded);
-  const gate = gateRepoName(loaded);
+  const { rule: gateRule, name: gate } = gateRepo(loaded);
   const tracked = loaded.trackSkills[0];
   const repo = gate ? stageGateRepo(root, gate) : null;
   const [prompt, write, commit, skill] = await Promise.all([
@@ -186,7 +188,10 @@ async function runProbes(loaded, env, root) {
       : fail('probe.on-prompt', `${rule.id} did not remind on its own sample (exit ${prompt.status}, ${ctx ? 'context without the tag' : 'no context'})`));
   }
 
-  if (!gate) out.push(fail('probe.pre-tool', 'no pre-commit block rule in the table'));
+  if (!gateRule) out.push(fail('probe.pre-tool', 'no pre-commit block rule in the table'));
+  // Nothing is broken: the table ships with no repository names, and until somebody adds their own
+  // there is no gated checkout to stage. A note says so; a failure would cry wolf on every install.
+  else if (!gate) out.push(note('probe.pre-tool', 'no gated repos configured; commit-gate probe skipped'));
   else if (!repo) out.push(fail('probe.pre-tool', `could not build a throwaway ${gate} checkout to probe with`));
   else {
     const asContext = loaded.preToolUseContext === 'additionalContext';

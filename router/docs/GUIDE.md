@@ -44,10 +44,11 @@ more skill under the router is one more row in that table.
 
 ### 2.1 Committing in a gated repo
 
-Gated repos (`repo_groups.web`): `portfolio-html`, `studio-kyoung`,
-`client-site-a`, `client-site-b`, `client-site-c`. Anywhere else
-(Self-GraphDB, claude-skills, the Corp repos) the commit gate never
-intervenes.
+Gated repos are whatever `repo_groups.web` lists, say `your-portfolio` and
+`client-site-a`. That group ships empty, so fill it in `skill-rules.json`, or in
+a gitignored `skill-rules.local.json` beside it when the names should stay out of
+git (the two are merged at load; see the rule table section of
+[../README.md](../README.md)). Anywhere else the commit gate never intervenes.
 
 1. **Work.** Edit and stage freely. The gate only looks at commit time.
 2. **Run `/verify`.** It runs git state, typecheck, tests and three viewport
@@ -590,8 +591,10 @@ by the prompt hook. That was measured with a probe session, not assumed.
 ~/claude-skills/router/
   skill-rules.json      policy: repo_groups · docs_only · pretooluse_context
                         · track_skills · allow_skills · rules[]
+  skill-rules.local.json  optional, gitignored: the same keys, merged over the
+                        table above (per group, per rule id)
   on-prompt.mjs         UserPromptSubmit: typed-skill invoke records,
-                        prompt reminders, self-echo guard
+                        prompt reminders, self-echo and harness-turn guards
   pre-tool.mjs          PreToolUse Bash|Write: commit gate, new-file backstop
   post-skill.mjs        PostToolUse Skill: ledger, trigger classification,
                         invoke records

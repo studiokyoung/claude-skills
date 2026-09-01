@@ -340,3 +340,17 @@ test('an in-scope gate rule with no skill still denies, and the buffer it lacks 
   assert.match(logOf(root), /\trecords\tverify-commit-gate\tportfolio-html\trecord-skipped\trule has no skill/);
   assert.deepEqual(recsOf(root, 'verify'), []);
 });
+
+// The gated repository names live in the local override, so one that will not parse ungates every
+// one of them. The gate cannot invent them back; what it must never do is go quiet about it.
+test('a local override that does not parse ungates the repos it named, and leaves the why in the log', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  fs.writeFileSync(path.join(root, 'skill-rules.local.json'), '{ not json');
+  const r = runHook('pre-tool.mjs', bash(dir, 'git commit -m "feat"'), env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  const log = logOf(root);
+  assert.match(log, /\trules\t-\t-\trules-load-failed\t.*skill-rules\.local\.json/);
+  assert.match(log, /\tcommit\t-\tportfolio-html\tallow\tout-of-scope/);
+});

@@ -50,11 +50,14 @@ function settingsView(allowSkills) {
 // ---------------------------------------------------------------- rules, repo, log, records
 
 function rulesView() {
-  const view = { path: rulesPath(), ok: false, error: null, repo_groups: {}, rules: [], pretooluse_context: null };
+  const view = { path: rulesPath(), ok: false, error: null, local: null, repo_groups: {}, rules: [], pretooluse_context: null };
   let loaded;
   try { loaded = loadRules(); }
   catch (e) { view.error = e.message; return { view, loaded: null }; }
   view.ok = true;
+  // The groups above are the merged view, so the console has to say where the names came from:
+  // reading `skill-rules.json` alone would not explain them on a machine with an override.
+  view.local = { path: loaded.localPath, active: loaded.localOverride, groups: loaded.localGroups, error: loaded.localError };
   view.repo_groups = loaded.repoGroups;
   view.pretooluse_context = loaded.preToolUseContext;
   view.rules = loaded.rules.map((r) => ({ id: r.id, skill: r.skill, event: r.event, repos: r.repos ?? '*', mode: r.mode }));
@@ -153,7 +156,11 @@ function md(o) {
   if (!o.rules.ok) L.push(`  does not load: ${o.rules.error}`);
   else {
     L.push(`  ${o.rules.rules.length} rules · pretooluse_context ${o.rules.pretooluse_context}`);
-    for (const [g, list] of Object.entries(o.rules.repo_groups)) L.push(`  ${g}: ${list.join(', ')}`);
+    for (const [g, list] of Object.entries(o.rules.repo_groups)) L.push(`  ${g}: ${list.join(', ') || '(empty)'}`);
+    const lo = o.rules.local;
+    if (lo.error) L.push(`  local   IGNORED · ${lo.error}`);
+    else if (lo.active) L.push(`  local   ${lo.path} · overrides ${lo.groups.length ? `repo_groups ${lo.groups.join(', ')}` : 'no repo group'}`);
+    else L.push(`  local   none (${lo.path})`);
     for (const r of o.rules.rules) L.push(`  ${r.id} · ${r.event} · ${Array.isArray(r.repos) ? r.repos.join('/') : r.repos} · ${r.mode} → ${r.skill}`);
   }
   const rp = o.repo;

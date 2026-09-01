@@ -1,7 +1,7 @@
 {
   "repo_groups": {
-    "web": ["portfolio-html", "studio-kyoung", "client-site-a", "client-site-b", "client-site-c"],
-    "corp": ["corp-app", "corp-dashboard", "corp-mobile", "corp-home", "corp-notifications"]
+    "web": [],
+    "corp": []
   },
   "docs_only": "\\.(md|mdx|txt|markdown)$",
   "pretooluse_context": "additionalContext",
