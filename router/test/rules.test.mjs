@@ -81,3 +81,24 @@ test('docs_only regex', () => {
   assert.equal(loaded.docsOnly.test('web/app/page.tsx'), false);
   assert.equal(loaded.docsOnly.test('_meta/HANDOFF.md'), true);
 });
+
+test('prompt patterns: rebuild, 구현된 vs 구현돼야, 추가적', () => {
+  const r = loaded.rules.find((x) => x.id === 'reuse-scout-prompt');
+  assert.equal(matchPrompt(r, 'rebuild the header component'), true);
+  assert.equal(matchPrompt(r, '이 기능 구현돼야 해'), true);
+  assert.equal(matchPrompt(r, '이 컴포넌트 새로 구현해줘'), true);
+  assert.equal(matchPrompt(r, '이 기능 이미 구현된 거 아니야?'), false);
+  assert.equal(matchPrompt(r, '이 기능 구현되어 있는지 확인해줘'), false);
+  assert.equal(matchPrompt(r, '추가적으로 확인해줘'), false);
+  assert.equal(matchPrompt(r, '이 기능도 추가적으로 확인해줘'), false);
+  assert.equal(matchPrompt(r, 'the rebuild is failing on the login page'), false);
+});
+
+test('docs_only matches by extension, never by directory name', () => {
+  assert.equal(loaded.docsOnly.test('docs/spec.md'), true);
+  assert.equal(loaded.docsOnly.test('README.md'), true);
+  assert.equal(loaded.docsOnly.test('notes.markdown'), true);
+  assert.equal(loaded.docsOnly.test('docs/x.tsx'), false);
+  assert.equal(loaded.docsOnly.test('web/app/docs/page.tsx'), false);
+  assert.equal(loaded.docsOnly.test('raw/session/run.mjs'), false);
+});
