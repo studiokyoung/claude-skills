@@ -87,7 +87,8 @@ test('uninstall keeps a foreign hook that shares an entry with ours', () => {
 });
 
 test('--settings without a path refuses instead of targeting the real file', () => {
-  const r = run(['--settings', '--dry-run']);
+  const { env } = testEnv();
+  const r = run(['--settings', '--dry-run'], env);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--settings needs a path/);
 });
@@ -103,4 +104,11 @@ test('uninstall keeps a user-set SKILL_RUNS_DIR', () => {
   const u = run(['--settings', file, '--uninstall'], env);
   assert.match(u.stdout, /kept SKILL_RUNS_DIR/);
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).env.SKILL_RUNS_DIR, '/Users/kyounghoonkim/MY-OWN-runs');
+});
+
+test('--settings=<path> is rejected instead of silently targeting the real file', () => {
+  const { env } = testEnv();
+  const r = run([`--settings=${path.join(tmpDir('settings-'), 'settings.json')}`, '--dry-run'], env);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--settings <path>/);
 });

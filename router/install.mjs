@@ -10,7 +10,9 @@ import { parseArgs } from './lib/args.mjs';
 import { routerDir } from './lib/paths.mjs';
 import { loadRules } from './lib/rules.mjs';
 
-const a = parseArgs(process.argv.slice(2));
+const argv = process.argv.slice(2);
+if (argv.some((t) => /^--settings=/.test(t))) { console.error('router: use --settings <path> (a space, not =)'); process.exit(2); }
+const a = parseArgs(argv);
 if (a.settings === true) { console.error('router: --settings needs a path'); process.exit(2); }
 const settingsPath = path.resolve(typeof a.settings === 'string' ? a.settings : path.join(os.homedir(), '.claude', 'settings.json'));
 const R = routerDir();
