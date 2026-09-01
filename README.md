@@ -17,6 +17,7 @@ projects; more follow as they earn it.
 | [`explain-diff`](skills/explain-diff/SKILL.md) | An approval gate for AI-written diffs. Reviews a change hunk by hunk, traces why each part exists, and gives every part a verdict, so the approve-or-not decision takes one read. |
 | [`verify`](skills/verify/SKILL.md) | The pre-commit gate as one command: git state, typecheck, tests, and viewport screenshots at 390, 768 and 1440, reported as one honest PASS/FAIL table. Never says verified for a step that did not run. |
 | [`reuse-scout`](skills/reuse-scout/SKILL.md) | A pre-flight scan before building anything: what the repo already has for each capability, which twin is canonical, and where new code is actually justified. |
+| [`skill-router`](skills/skill-router/SKILL.md) | The operator end of the router. Says whether it is installed, which repos the commit gate covers, what the log decided and why a commit was denied, and installs or removes it behind an explicit yes. |
 
 There is also a [`router`](router/README.md): three hooks that make these fire on
 their own (a commit gate for `verify`, reminders for `reuse-scout`), and a local
@@ -42,9 +43,10 @@ git clone https://github.com/studiokyoung/claude-skills ~/claude-skills
 ln -sfn ~/claude-skills/skills/explain-diff ~/.claude/skills/explain-diff
 ln -sfn ~/claude-skills/skills/verify ~/.claude/skills/verify
 ln -sfn ~/claude-skills/skills/reuse-scout ~/.claude/skills/reuse-scout
+ln -sfn ~/claude-skills/skills/skill-router ~/.claude/skills/skill-router
 ```
 
-That gives you `/explain-diff`, `/verify` and `/reuse-scout`, and `git pull`
+That gives you `/explain-diff`, `/verify`, `/reuse-scout` and `/skill-router`, and `git pull`
 updates them in place with no copies to drift. If the checkout lives outside your project, add it to
 `permissions.additionalDirectories` in `~/.claude/settings.json` so the skill's
 reference files can be read without prompts.
