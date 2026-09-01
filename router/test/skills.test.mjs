@@ -20,7 +20,7 @@ test('every published skill carries metadata.version', () => {
   assert.equal(readSkillVersion('verify'), '1.1.0');
   assert.equal(readSkillVersion('reuse-scout'), '1.1.0');
   assert.equal(readSkillVersion('explain-diff'), '2.2.0');
-  assert.equal(readSkillVersion('skill-router'), '1.0.0');
+  assert.equal(readSkillVersion('skill-router'), '1.1.0');
   assert.equal(readSkillVersion('skill-review'), '1.0.0');
 });
 
@@ -48,6 +48,24 @@ test('every skill the installer pre-allows actually ships in this repo', () => {
   for (const name of loadRules().allowSkills) {
     assert.ok(fs.existsSync(path.join(routerDir, '..', 'skills', name, 'SKILL.md')), `allow_skills names ${name}, which has no SKILL.md here`);
   }
+});
+
+test('skill-router: the console reads the state through status.mjs, never by hand', () => {
+  const t = skill('skill-router');
+  const fm = frontmatter(t);
+  assert.match(fm, /argument-hint: "\[status\|log \[n\]\|rules\|records \[skill\]\|why-denied\|install\|uninstall\|doc\]"/);
+  assert.match(fm, /status\.mjs/);
+  assert.match(fm, /selfcheck\.mjs --cli/);
+  assert.match(fm, /install\.mjs --dry-run/);
+  // The mutating installer stays out of allowed-tools on purpose: its permission prompt is the
+  // second confirmation. And nothing re-derives the state the console already computed.
+  assert.equal(/Bash\(node [^)]*install\.mjs:\*\)/.test(fm), false);
+  assert.equal(/Bash\(node -e:/.test(fm), false);
+  assert.ok(at(t, '## 2. status') < at(t, '## 6. why-denied'));
+  assert.ok(at(t, '## 9. Boundaries') < at(t, '## Verification (self-check'));
+  // the rotated file is read wherever a window can reach past it, and the caveat is kept verbatim
+  assert.match(t, /router\.log\.1/);
+  assert.match(t, /hooks are captured at session\s+start/i);
 });
 
 test('skill-review: the ritual in order, the graph conventions, and the no-edit rule', () => {
