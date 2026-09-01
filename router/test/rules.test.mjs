@@ -12,8 +12,8 @@ test('rule table loads with compiled patterns and the top-level keys', () => {
   assert.ok(loaded.repoGroups.web.includes('portfolio-html'));
   assert.ok(loaded.docsOnly instanceof RegExp);
   assert.ok(['additionalContext', 'deny-once'].includes(loaded.preToolUseContext));
-  assert.deepEqual(knownSkills(loaded).sort(), ['explain-diff', 'reuse-scout', 'save-memory', 'verify']);
-  assert.deepEqual(loaded.allowSkills, ['verify', 'reuse-scout']);
+  assert.deepEqual(knownSkills(loaded).sort(), ['explain-diff', 'reuse-scout', 'save-memory', 'skill-review', 'skill-router', 'verify']);
+  assert.deepEqual(loaded.allowSkills, ['verify', 'reuse-scout', 'skill-router', 'skill-review']);
   const r = loaded.rules.find((x) => x.id === 'reuse-scout-prompt');
   assert.equal(r._patterns.length, 2);
   assert.ok(r._patterns[0] instanceof RegExp);
@@ -109,4 +109,12 @@ test('matchPromptIndex names which pattern fired, -1 when none does', () => {
   assert.equal(matchPromptIndex(r, '버튼 컴포넌트 하나 만들어줘'), 1);
   assert.equal(matchPromptIndex(r, 'why is this test flaky?'), -1);
   assert.equal(matchPrompt(r, 'add a useDebounce hook'), true);
+});
+
+test('the probe sample rides with the rule and must still match it', () => {
+  const r = loaded.rules.find((x) => x.id === 'reuse-scout-prompt');
+  assert.equal(r.sample, '버튼 컴포넌트 하나 만들어줘');
+  // The self-check sends this sentence through the real hook, so a pattern edit that stops matching
+  // it has to fail here, in the suite, rather than at somebody's next session start.
+  assert.ok(matchPromptIndex(r, r.sample) >= 0, 'the sample must match the rule it probes');
 });

@@ -25,7 +25,7 @@ test('install merges hooks/allow/env, keeps foreign entries, writes a backup, an
   assert.equal(r.status, 0, r.stderr);
   const s = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(s.model, 'claude-fable-5[1m]');
-  assert.deepEqual(s.permissions.allow, ['Skill(explain-diff)', 'Skill(verify)', 'Skill(reuse-scout)']);
+  assert.deepEqual(s.permissions.allow, ['Skill(explain-diff)', 'Skill(verify)', 'Skill(reuse-scout)', 'Skill(skill-router)', 'Skill(skill-review)']);
   assert.deepEqual(s.permissions.additionalDirectories, ['~/Self-GraphDB']);
   assert.ok(s.env.SKILL_RUNS_DIR.endsWith(path.join('.claude', 'skill-runs')));
   assert.equal(s.hooks.PreToolUse.length, 2);

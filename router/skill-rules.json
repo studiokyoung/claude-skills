@@ -5,8 +5,8 @@
   },
   "docs_only": "\\.(md|mdx|txt|markdown)$",
   "pretooluse_context": "additionalContext",
-  "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff"],
-  "allow_skills": ["verify", "reuse-scout"],
+  "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff", "skill-router", "skill-review"],
+  "allow_skills": ["verify", "reuse-scout", "skill-router", "skill-review"],
   "rules": [
     {
       "id": "verify-commit-gate",
