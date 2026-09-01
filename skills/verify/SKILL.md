@@ -179,6 +179,10 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
      --gates '{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' \
      --routes '["/","/work/x"]'
    ```
+   `--routes` here is a JSON array (`'["/","/work/x"]'`), not the comma list `shoot.mjs`
+   takes; if the command prints `bad-routes-json`, no marker was written — fix the
+   argument and rerun it.
+
    It writes `.git/verify-pass` with a fingerprint of the exact tree you verified. The
    router's commit gate (web repos) accepts `git commit` only while the tree still
    matches; one more edit means one more `/verify`. When the verdict is *not safe*,
@@ -187,13 +191,20 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
 2. **Run record — always, safe or not:**
    ```
    node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
-     '{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"SKIP"},"tiles":9,"routes":["/"],"duration_s":84,"caught":["tests: carousel.test.ts failed"]}'
+     '{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":84,"caught":[]}'
    ```
-   Use the table's real values. `verdict` is `safe` or `not-safe`; `gates` values are
-   `PASS` / `FAIL` / `SKIP`; `caught` lists what the gate actually stopped (a failing
-   suite, a typecheck error, a page error in the tiles) and is `[]` when everything
-   passed. The record is one appended line in `$SKILL_RUNS_DIR/verify.jsonl`
-   (default `~/.claude/skill-runs/`); it never touches the repo.
+   The same command when a gate failed — the verdict flips with it:
+   ```
+   node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
+     '{"verdict":"not-safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"PASS"},"tiles":9,"routes":["/"],"duration_s":61,"caught":["tests: carousel.test.ts failed"]}'
+   ```
+   Use the table's real values. `verdict` follows §3's rule exactly: `safe` only when
+   every applicable gate is ✅PASS and no should-run gate was ⏭️SKIP — anything else is
+   `not-safe`. `gates` values are `PASS` / `FAIL` / `SKIP`; `caught` lists what the gate
+   actually stopped (a failing suite, a typecheck error, a page error in the tiles) and
+   is `[]` when everything passed. The record is one appended line in
+   `$SKILL_RUNS_DIR/verify.jsonl` (default `~/.claude/skill-runs/`); it never touches
+   the repo.
 
 Both commands print one JSON line; if either prints `"ok": false`, say so under the
 table (the gate result still stands; the bookkeeping did not).
