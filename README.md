@@ -7,7 +7,7 @@ as things I kept repeating in chat, so I moved them into skills and let the
 review rounds tighten them.
 
 I am Kyoung Hoon Kim ([studiokyoung](https://github.com/studiokyoung)), a
-design engineer. This is the first one that survived contact with real
+design engineer. These are the ones that survived contact with real
 projects; more follow as they earn it.
 
 ## Skills
@@ -15,6 +15,12 @@ projects; more follow as they earn it.
 | Skill | What it is for |
 |---|---|
 | [`explain-diff`](skills/explain-diff/SKILL.md) | An approval gate for AI-written diffs. Reviews a change hunk by hunk, traces why each part exists, and gives every part a verdict, so the approve-or-not decision takes one read. |
+| [`verify`](skills/verify/SKILL.md) | The pre-commit gate as one command: git state, typecheck, tests, and viewport screenshots at 390, 768 and 1440, reported as one honest PASS/FAIL table. Never says verified for a step that did not run. |
+| [`reuse-scout`](skills/reuse-scout/SKILL.md) | A pre-flight scan before building anything: what the repo already has for each capability, which twin is canonical, and where new code is actually justified. |
+
+There is also a [`router`](router/README.md): three hooks that make these fire on
+their own (a commit gate for `verify`, reminders for `reuse-scout`), and a local
+run record for every invocation so the skills can be tightened from evidence.
 
 ## Install
 
@@ -40,6 +46,16 @@ That gives you `/explain-diff`, and `git pull` updates it in place with no
 copies to drift. If the checkout lives outside your project, add it to
 `permissions.additionalDirectories` in `~/.claude/settings.json` so the skill's
 reference files can be read without prompts.
+
+To have the skills fire without being called, install the router too:
+
+```bash
+node ~/claude-skills/router/install.mjs
+```
+
+It adds three hooks, two allow rules, and one env var to `~/.claude/settings.json`
+(a backup is written first) and can be removed with `--uninstall`. Details in
+[router/README.md](router/README.md).
 
 To try the whole repo without installing anything, point one session at the
 checkout:
@@ -142,6 +158,9 @@ blind spot and an evidence-ladder fallback that skipped the session docs.
 
 ## Changelog
 
+- **v3** (2026-08-31). Two new skills, `verify` and `reuse-scout`, and the `router`:
+  hooks that gate commits on a passing verify, remind about reuse-scout at the right
+  moment, and record every skill run to a local JSONL buffer.
 - **v2.2** (2026-08-17). Translated to English for publication, and the parked
   polish batch applied: HTML escaping for `<`, `>`, and `&` in note text, the
   filename suffix rule spelled out, and the language rule generalized so the
