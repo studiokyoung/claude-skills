@@ -40,10 +40,12 @@ run it myself), symlink it into your own skills directory:
 ```bash
 git clone https://github.com/studiokyoung/claude-skills ~/claude-skills
 ln -sfn ~/claude-skills/skills/explain-diff ~/.claude/skills/explain-diff
+ln -sfn ~/claude-skills/skills/verify ~/.claude/skills/verify
+ln -sfn ~/claude-skills/skills/reuse-scout ~/.claude/skills/reuse-scout
 ```
 
-That gives you `/explain-diff`, and `git pull` updates it in place with no
-copies to drift. If the checkout lives outside your project, add it to
+That gives you `/explain-diff`, `/verify` and `/reuse-scout`, and `git pull`
+updates them in place with no copies to drift. If the checkout lives outside your project, add it to
 `permissions.additionalDirectories` in `~/.claude/settings.json` so the skill's
 reference files can be read without prompts.
 
@@ -54,8 +56,10 @@ node ~/claude-skills/router/install.mjs
 ```
 
 It adds three hooks, two allow rules, and one env var to `~/.claude/settings.json`
-(a backup is written first) and can be removed with `--uninstall`. Details in
-[router/README.md](router/README.md).
+(a backup is written first) and can be removed with `--uninstall`. Before that
+first run, put your own repository names in `repo_groups` in
+`router/skill-rules.json`: the `web` group is where the commit gate applies, and
+mine are in there by default. Details in [router/README.md](router/README.md).
 
 To try the whole repo without installing anything, point one session at the
 checkout:

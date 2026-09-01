@@ -1,7 +1,7 @@
 {
   "name": "kyoung",
-  "description": "Claude Code skills Kyoung Hoon Kim uses on his own work, starting with explain-diff, an approval gate for AI-written diffs.",
-  "version": "0.1.0",
+  "description": "Claude Code skills Kyoung Hoon Kim uses on his own work: explain-diff (an approval gate for AI-written diffs), verify (the pre-commit gate as one honest PASS/FAIL table), and reuse-scout (a pre-flight scan of what the repo already has), plus a hook router that fires them at the right moment and records every run.",
+  "version": "3.0.0",
   "author": {
     "name": "Kyoung Hoon Kim",
     "url": "https://github.com/studiokyoung"

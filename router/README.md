@@ -16,10 +16,10 @@ record of every run so the skills can be improved from evidence later.
   having run it, it is reminded once more (once per session).
 - **save-memory reminder.** In the repos under `repo_groups.corp`, wrap-up phrasing
   ("wrap up", "마감", ...) triggers a reminder to run `save-memory` if it has not run.
-- **run records.** Every invocation of a tracked skill is logged with how it was
-  triggered (typed by you, suggested by the router, or picked by the model), every
-  skill appends its outcome when it finishes, and `debrief` can append what a run
-  missed. One JSONL file per skill in `~/.claude/skill-runs/`. Run records never
+- **run records.** Every successful invocation of a tracked skill is logged with how
+  it was triggered (typed by you, suggested by the router, or picked by the model),
+  every skill appends its outcome when it finishes, and `debrief` can append what a
+  run missed. One JSONL file per skill in `~/.claude/skill-runs/`. Run records never
   touch a repo; the only thing `/verify` writes inside a repo is `.git/verify-pass`,
   which git ignores.
 
@@ -46,7 +46,7 @@ each with a 5 second timeout:
 | `PostToolUse` | `Skill` | `post-skill.mjs` |
 
 It also adds `Skill(verify)` and `Skill(reuse-scout)` to `permissions.allow` (that
-list comes from `allow_skills` in `skill-rules.json`: a skill with `allowed-tools`
+list comes from `allow_skills` in `router/skill-rules.json`: a skill with `allowed-tools`
 otherwise stops at a permission prompt, which auto-denies in non-interactive runs),
 and sets `env.SKILL_RUNS_DIR` to `~/.claude/skill-runs`.
 
@@ -59,7 +59,7 @@ version.
 
 ## The rule table
 
-`skill-rules.json` is the only place policy lives. The scripts are generic.
+`router/skill-rules.json` is the only place policy lives. The scripts are generic.
 
 ```json
 {
@@ -76,9 +76,11 @@ version.
   records for; every skill named by a rule is already in it. `allow_skills` is what
   the installer turns into `permissions.allow` entries. `docs_only` is matched
   case-insensitively against each path a commit would carry.
-- `repos` is a group name, `*`, or an explicit list of repository directory names
-  (the basename of `git rev-parse --show-toplevel`). Outside a git repo only `*`
-  rules apply.
+- `repos` is a group name, `*`, or an explicit list of repository directory names.
+  The name is the basename of the repository root, taken from
+  `git rev-parse --git-common-dir`, so a linked worktree answers with its main
+  checkout's name and stays in the same group. Outside a git repo only `*` rules
+  apply.
 - `event: prompt` matches `patterns` (case-insensitive, Unicode) against the first
   4000 characters of the prompt. `event: new-file` matches `paths` against the
   repo-relative path of a file that does not exist yet (the `Write` tool's
@@ -118,9 +120,13 @@ that must not. No script changes are needed.
    inside `&&` chains, behind `env FOO=1`, with `-C <path>`, with `--amend`). It has
    to start the segment, so `echo "git commit"` is not a commit.
 2. It resolves the repo the command itself targets: `git -C <path>`, or a preceding
-   `cd <path>` in the same command, falling back to the hook's own cwd when that
-   base cannot be resolved. No `pre-commit` block rule in scope means allow,
-   silently.
+   `cd <path>` in the same command (a relative `-C` composes with the `cd`, the way
+   the shell resolves it), falling back to the hook's own cwd when that base cannot
+   be resolved. The base directory is then resolved through symlinks, since git
+   answers with physical paths and a symlinked checkout would otherwise put every
+   pathspec outside the repo. Pathspecs themselves are never resolved that way: one
+   may name a file that does not exist yet. No `pre-commit` block rule in scope
+   means allow, with no user-visible output (still logged).
 3. `SKIP_VERIFY=1` heading a command segment (an env assignment, the way the shell
    reads it) means allow, logged as `override SKIP_VERIFY`. The same text inside
    quotes or a heredoc body is data, not an override, so a commit message may
@@ -136,13 +142,25 @@ that must not. No script changes are needed.
    model.
 
 The fingerprint is a SHA-256 over `HEAD`, the porcelain status list collapsed to a
-change class, the file modes, and the git blob hash of every changed or untracked
-file. So it is content-based (a same-length edit still moves it), mode-aware (a
-`chmod` on an already dirty file moves it), and staging-neutral: running `/verify`,
-then `git add`, then committing stays valid, while any actual edit in between does
-not. It fails closed. If any git call fails the fingerprint is unavailable and the
-gate denies with `fingerprint unavailable (git failed)` rather than passing on a
-hash computed over less than the whole tree.
+change class, the file modes, and one line per changed file. A file that exists in
+`HEAD` contributes its git blob hash, so a same-length edit still moves the
+fingerprint. A file that does not (untracked, or newly added to the index), and any
+file over 8 MB, contributes `size:mtime` instead: its content is new by definition,
+and reading it is what costs. One real checkout carries 456 MB of untracked images,
+which took about 2 seconds per gate to hash and crowded the 4 second git timeout,
+and a timeout there jams the gate and `mark-pass` alike. The trade is that touching
+a new file without editing it can move the fingerprint, which costs one more
+`/verify`.
+
+So the fingerprint is content-based for tracked files, mode-aware (a `chmod` on an
+already dirty file moves it), and staging-neutral: running `/verify`, then
+`git add`, then committing stays valid, while any actual edit in between does not.
+It fails closed. If any git call fails the fingerprint is unavailable and the gate
+denies with `fingerprint unavailable (git failed)` rather than passing on a hash
+computed over less than the whole tree.
+
+In a linked worktree the marker lives in that worktree's own git directory, so two
+worktrees of the same repository each need their own passing `/verify`.
 
 `/verify` writes the marker through `skills/verify/references/mark-pass.mjs` (a shim
 over `router/mark-pass.mjs`) only when its verdict is safe, and clears it otherwise:
@@ -152,10 +170,32 @@ node ~/claude-skills/router/mark-pass.mjs --root <repo> --gates '{"git":"PASS","
 node ~/claude-skills/router/mark-pass.mjs --root <repo> --clear
 ```
 
-`--routes` is a JSON array, and a malformed one is an error rather than a null
-field, because the marker is the record of what `/verify` actually ran. The
-failures it reports, each meaning no marker was written: `not-a-git-repo`,
+`--routes` is a JSON array, and a bare comma list is accepted too (`--routes /` and
+`--routes /,/work/x` both become `["/"]` and `["/","/work/x"]`), since that is how
+routes are usually at hand. A value that opens with a bracket and does not parse is
+still an error, and so is one that leaves nothing after the split: the marker is the
+record of what `/verify` actually ran, and a route it never checked must not appear
+there. `--gates` is a map, not a list, so it stays strict JSON. The failures
+`mark-pass` reports, each meaning no marker was written: `not-a-git-repo`,
 `bad-gates-json`, `bad-routes-json`, `fingerprint-failed`, `marker-write-failed`.
+
+## What the gate cannot see
+
+It reads one Bash command at a time, as text. Everything below reaches git without
+passing that text, and none of it is denied:
+
+- Commits git makes on its own behalf: `git revert`, `git merge`, `git cherry-pick`,
+  `git rebase --continue`, `git stash` (the verb has to be `commit`).
+- A commit inside a script or an npm target: `./release.sh`, `npm run ship`. The
+  hook sees the wrapper, not the `git commit` two files down.
+- Wrappers that hide the command from the parser: `timeout 60 git commit ...`,
+  `bash -c "git commit ..."`, `eval`, `xargs`, a git alias that commits.
+- Commits typed in your own terminal. This is a gate on an agent claiming done, not
+  a git `pre-commit` hook, and that is deliberate: your own commits are yours.
+- Anything in a repository outside `repo_groups.web`.
+
+The gate is a floor for the common path, not a proof. Where it cannot see, the
+`/verify` habit is still what protects the tree.
 
 ## Run records
 
@@ -171,7 +211,10 @@ failures it reports, each meaning no marker was written: `not-a-git-repo`,
   command, written by the prompt hook), `router` (a reminder for that skill fired
   earlier in the session) or `model` (the model picked the skill on its own); the
   last two are written by the `Skill` hook, for tracked skills only.
-- `run` is written by the skill itself as its last step through `record-run.mjs`.
+- `run` is written by the skill itself as its last step through `record-run.mjs`,
+  which is the only run-record write in the system: no hook ever writes a `run`
+  line, so an `invoke` with no `run` beside it is exactly what a skill that quit
+  before finishing looks like.
   `version` comes from the skill's `metadata.version`, so outcomes are comparable
   per skill version. Everything in `--json` except `caught` lands under `outcome`.
   `session_id` is inferred from the newest ledger for the same repo within the last

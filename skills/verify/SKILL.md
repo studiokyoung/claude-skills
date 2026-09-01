@@ -183,7 +183,8 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
    takes; if the command prints `bad-routes-json`, no marker was written — fix the
    argument and rerun it.
 
-   It writes `.git/verify-pass` with a fingerprint of the exact tree you verified. The
+   The command writes `.git/verify-pass` with a fingerprint of the exact tree you
+   verified. The
    router's commit gate (web repos) accepts `git commit` only while the tree still
    matches; one more edit means one more `/verify`. When the verdict is *not safe*,
    clear any stale marker instead:
@@ -196,7 +197,7 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
    The same command when a gate failed — the verdict flips with it:
    ```
    node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
-     '{"verdict":"not-safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"PASS"},"tiles":9,"routes":["/"],"duration_s":61,"caught":["tests: carousel.test.ts failed"]}'
+     '{"verdict":"not-safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":61,"caught":["tests: carousel.test.ts failed"]}'
    ```
    Use the table's real values. `verdict` follows §3's rule exactly: `safe` only when
    every applicable gate is ✅PASS and no should-run gate was ⏭️SKIP — anything else is
@@ -211,7 +212,7 @@ table (the gate result still stands; the bookkeeping did not).
 
 ## Verification (self-check before you report — mandatory)
 
-Before printing the table, confirm each — if any answer is no, fix the table,
+Before you report, confirm each — if any answer is no, fix the table,
 do not soften it:
 
 - Did every gate the stack detection marked **applicable** actually execute? A

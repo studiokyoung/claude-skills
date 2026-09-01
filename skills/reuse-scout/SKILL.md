@@ -150,8 +150,11 @@ One command, so the run ledger (`$SKILL_RUNS_DIR/reuse-scout.jsonl`, default
 
 ```
 node <skill dir>/references/record-run.mjs --skill reuse-scout --cwd <repoRoot> --json \
-  '{"ask":"<ask>","capabilities":4,"reuse":2,"partial":1,"new":1,"twins_found":1,"caught":["Footer twin at components/shell/Footer.tsx: extend, do not add a third"]}'
+  '{"ask":"<ask>","capabilities":3,"reuse":2,"partial":0,"new":1,"twins_found":1,"caught":["Footer twin at components/shell/Footer.tsx: extend, do not add a third"]}'
 ```
+
+`<skill dir>` is the directory this SKILL.md sits in. The numbers above are §5's
+manifest read straight off the table: 3 capabilities, 2 reused, 0 partial, 1 new.
 
 `capabilities` / `reuse` / `partial` / `new` are the manifest counts; `twins_found` counts
 capabilities with 2+ real implementations; `caught` names each reuse or twin the scan
