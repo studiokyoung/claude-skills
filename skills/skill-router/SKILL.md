@@ -151,7 +151,7 @@ to go read in §4.
 | `new-file` | `remind` (context injected) or `deny-once` (first attempt denied, retry passes) |
 | `skill` | `invoke` (a tracked skill ran), `skip`, `record-failed`, `rules-load-failed` |
 | `records` | `record-failed`, `record-skipped` (the rule that decided names no skill, so there was no buffer to write to) |
-| `health` | `ok` / `fail` from a self-check, the session hook and `--cli` alike (`via` says which) |
+| `health` | `ok` / `fail` from a self-check, the session hook and `--cli` alike. The log line has no `via`; that field is in `router.jsonl` |
 | `rules` | `rules-load-failed` — the table did not parse, so everything was let through. The prompt and tool hooks log it under `rules`, the skill hook under `skill`, so a broken table shows up on both rows |
 
 The `why` column on a `commit` line is a fixed vocabulary. The first five are

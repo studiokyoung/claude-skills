@@ -331,10 +331,12 @@ node ~/claude-skills/router/selfcheck.mjs --cli   # the same six checks as a tab
 ```
 
 Every self-check appends one `health` record, the SessionStart hook and `--cli`
-alike, and the record carries `via: "hook"` or `via: "cli"` so a report can tell
-them apart. That is what fills the Health history between sessions: a scheduled
-`--cli` run, from a cron entry or a launchd agent, keeps the daily row coming in a
-week when nobody opened a session.
+alike, and the record carries `via: "hook"` or `via: "cli"`. Nothing reads that
+field yet: neither the report nor the status console splits the two, so it is
+recorded now so the split is possible later without a hole in the history. What the
+`--cli` record already does is fill the Health history between sessions: a scheduled
+run, from a cron entry or a launchd agent, keeps the daily row coming in a week when
+nobody opened a session.
 
 `SKILL_ROUTER_SELFCHECK=0` switches it off for a session. Like every other hook
 it exits 0 no matter what happens inside it: the worst a broken self-check can do
@@ -433,7 +435,11 @@ cd ~/claude-skills && node --test 'router/test/*.test.mjs'
 
 Quote the glob so Node expands it. The bare directory form (`node --test
 router/test/`) is read as a module path on Node 22, so it fails without running any
-of them. Fixture tests pipe hook JSON into each script against temp git repos and
+of them. `npm test` runs the same glob with `--test-concurrency=4`, which
+`package.json` has no way to explain: the self-check cases spawn four probe children
+each and kill them at 5 s, so on a busy machine the suite starves its own probes and
+random `probe.*` checks fail. The cap trades wall time for that determinism; the
+uncapped command above is the faster one when the box is idle. Fixture tests pipe hook JSON into each script against temp git repos and
 temp state directories, with `HOME` redirected too, so a run never touches your real
 `~/.claude`.
 

@@ -234,8 +234,9 @@ function record(checks, ms, via) {
   const rec = {
     type: 'health',
     // Which path ran it: the SessionStart hook, or a `--cli` run (a person at a terminal, or a
-    // scheduled agent). The record is the same either way; this is what lets a report tell a
-    // session's own check apart from one a cron job made.
+    // scheduled agent). The record is the same either way. Written only, for now: neither report.mjs
+    // nor status.mjs reads `via` yet, so no output distinguishes a cron check from a session check.
+    // It is here so the history can be split later without a gap in the records.
     via,
     ok: failures.length === 0,
     checks: Object.fromEntries(checks.map((c) => [c.name, c.ok])),

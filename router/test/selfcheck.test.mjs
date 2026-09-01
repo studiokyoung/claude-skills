@@ -38,7 +38,7 @@ const context = (r) => {
   return last ? (JSON.parse(last).hookSpecificOutput || {}).additionalContext || '' : '';
 };
 
-test('every check passes: no stdout, an ok health record, an ok log line, under a second', () => {
+test('every check passes: no stdout, an ok health record tagged via hook, an ok log line, inside the hook budget', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
   const r = runHook('selfcheck.mjs', start(), env);
