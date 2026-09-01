@@ -16,6 +16,12 @@ record of every run so the skills can be improved from evidence later.
   having run it, it is reminded once more (once per session).
 - **save-memory reminder.** In the repos under `repo_groups.corp`, wrap-up phrasing
   ("wrap up", "마감", ...) triggers a reminder to run `save-memory` if it has not run.
+- **self-check.** At every session start the router probes itself against temp
+  directories and says nothing if it still works. A broken install announces
+  itself in one line instead of going quiet for a month.
+- **weekly review.** `report.mjs` aggregates the records into one deterministic
+  report (conversions, gate cycles, catch rate per version, candidate edits), and
+  `/skill-review` is the Friday ritual that reads it and files the week.
 - **run records.** The evidence layer: every reminder the router delivers, every
   commit decision the gate makes, every invocation of a tracked skill (with how it was
   triggered: typed by you, suggested by the router, or picked by the model), the
@@ -37,19 +43,23 @@ node ~/claude-skills/router/install.mjs --dry-run   # print the changes without 
 node ~/claude-skills/router/install.mjs --uninstall
 ```
 
-Requirements: Node 22+, git. No npm packages. The installer registers three hooks,
-each with a 5 second timeout:
+Requirements: Node 22+, git. No npm packages. The installer registers four hooks:
 
-| Event | Matcher | Script |
-|---|---|---|
-| `UserPromptSubmit` | (none, so every prompt) | `on-prompt.mjs` |
-| `PreToolUse` | `Bash\|Write` | `pre-tool.mjs` |
-| `PostToolUse` | `Skill` | `post-skill.mjs` |
+| Event | Matcher | Script | Timeout |
+|---|---|---|---|
+| `UserPromptSubmit` | (none, so every prompt) | `on-prompt.mjs` | 5s |
+| `PreToolUse` | `Bash\|Write` | `pre-tool.mjs` | 5s |
+| `PostToolUse` | `Skill` | `post-skill.mjs` | 5s |
+| `SessionStart` | (none) | `selfcheck.mjs` | 10s |
 
-It also adds `Skill(verify)` and `Skill(reuse-scout)` to `permissions.allow` (that
-list comes from `allow_skills` in `router/skill-rules.json`: a skill with `allowed-tools`
-otherwise stops at a permission prompt, which auto-denies in non-interactive runs),
-and sets `env.SKILL_RUNS_DIR` to `~/.claude/skill-runs`.
+The last one is the [self-check](#self-check-sessionstart), and its budget is
+longer because it spawns the other three before it answers.
+
+It also adds one `permissions.allow` entry per name in `allow_skills`
+(`Skill(verify)`, `Skill(reuse-scout)`, `Skill(skill-router)`,
+`Skill(skill-review)`: a skill with `allowed-tools` otherwise stops at a
+permission prompt, which auto-denies in non-interactive runs), and sets
+`env.SKILL_RUNS_DIR` to `~/.claude/skill-runs`.
 
 Every write is idempotent, so a second run prints `router: nothing to change`, and
 the existing settings file is copied to `settings.json.bak-<timestamp>` before
@@ -67,9 +77,9 @@ version.
   "repo_groups": { "web": ["portfolio-html"], "corp": ["corp-app"] },
   "docs_only": "\\.(md|mdx|txt|markdown)$",
   "pretooluse_context": "additionalContext",
-  "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff"],
-  "allow_skills": ["verify", "reuse-scout"],
-  "rules": [ { "id": "...", "skill": "...", "event": "prompt | pre-commit | new-file", "repos": "web | corp | * | [\"name\"]", "mode": "block | remind", "once_per_session": true, "unless_ran": "reuse-scout", "patterns": ["regex"], "paths": ["regex"], "message": "..." } ]
+  "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff", "skill-router", "skill-review"],
+  "allow_skills": ["verify", "reuse-scout", "skill-router", "skill-review"],
+  "rules": [ { "id": "...", "skill": "...", "event": "prompt | pre-commit | new-file", "repos": "web | corp | * | [\"name\"]", "mode": "block | remind", "once_per_session": true, "unless_ran": "reuse-scout", "patterns": ["regex"], "sample": "a sentence that must match", "paths": ["regex"], "message": "..." } ]
 }
 ```
 
@@ -82,6 +92,10 @@ version.
   `git rev-parse --git-common-dir`, so a linked worktree answers with its main
   checkout's name and stays in the same group. Outside a git repo only `*` rules
   apply.
+- `sample` on a `prompt` rule is a sentence that must match it. The session
+  self-check sends that exact sentence through the real hook, and the test suite
+  holds it to still matching, so a pattern edit that quietly stops working fails
+  in the suite rather than at somebody's next session start.
 - `event: prompt` matches `patterns` (case-insensitive, Unicode) against the first
   4000 characters of the prompt. `event: new-file` matches `paths` against the
   repo-relative path of a file that does not exist yet (the `Write` tool's
@@ -265,6 +279,102 @@ less than it looks. Grouping `run` lines by `version` and reading the `annotatio
 lines that point at them gives the catch and miss rate per skill version, which is
 the number that says whether an edit to a skill actually made it better.
 
+None of that has to be computed by hand: `report.mjs` below does exactly these
+joins and prints them, so the weekly review argues with counts instead of
+impressions.
+
+## Self-check (SessionStart)
+
+`selfcheck.mjs` runs at every session start and answers the one question the log
+cannot: **is the router still wired, and does it still fire?** Six checks, about
+450 ms, silent while everything passes.
+
+| check | what it proves |
+|---|---|
+| `settings` | `~/.claude/settings.json` parses, all four hook entries are registered, each one from THIS checkout, every `allow_skills` name is in `permissions.allow`, and `env.SKILL_RUNS_DIR` is set |
+| `rules` | the table loads, every reminder rule has a message, every group a rule names exists, and `pretooluse_context` is one of the two values |
+| `probe.on-prompt` | the prompt hook still turns the reuse-scout rule's own `sample` sentence into a reminder |
+| `probe.pre-tool` | a new file under `components/` still draws the backstop reminder, and an unverified commit in a gated repo is still denied |
+| `probe.post-skill` | a `Skill` call still lands in a session ledger |
+| `node` | Node 22 or newer |
+
+The three probes spawn the real hook scripts against a throwaway `HOME`, state
+directory, records directory and git checkout, with `SKILL_ROUTER_PROBE=1` in the
+child environment, so a probe can never write a real record and can never
+re-enter the check. The four spawns run in parallel, which is what keeps the
+whole thing inside a session-start budget.
+
+All green: nothing on stdout, one `health` record appended to
+`~/.claude/skill-runs/router.jsonl`, one `health` line in the log. Any failure:
+one line of context into the session naming each failed check with its reason,
+and the same list in the record. The repair is `/skill-router install`, run
+deliberately; a hook never rewrites `settings.json` mid-session, and a settings
+change only takes effect in a new session anyway.
+
+```bash
+node ~/claude-skills/router/selfcheck.mjs --cli   # the same six checks as a table, exit 1 on failure
+```
+
+`SKILL_ROUTER_SELFCHECK=0` switches it off for a session. Like every other hook
+it exits 0 no matter what happens inside it: the worst a broken self-check can do
+is fail to warn you.
+
+## Weekly review (report.mjs, /skill-review)
+
+`report.mjs` is the deterministic half of the review. It reads every buffer,
+keeps the lines inside the window, and prints one report.
+
+```bash
+node ~/claude-skills/router/report.mjs                                  # markdown, since the last review
+node ~/claude-skills/router/report.mjs --since 2026-08-25T00:00:00Z --json
+node ~/claude-skills/router/report.mjs --mark                           # close the window, print nothing else
+```
+
+The window runs from the `last` timestamp in
+`~/.claude/router-state/review-watermark.json`, else the last seven days;
+`--since` overrides both. `--mark` writes the watermark to now and prints the one
+it replaced, so the next review starts where this one stopped.
+
+Per skill: invokes by trigger; reminders by rule with the conversion rate (a
+reminder the skill actually followed in the same session) and the excerpts of the
+ones that converted nothing; runs by verdict, version, per-gate status and summed
+numeric outcomes, with what they caught; gate decisions by reason, plus the deny
+to allow cycle (how often, how stale the marker was when the gate finally took
+it, how many denies it took); annotations; and the self-check history.
+
+`Candidates` are threshold crossings, not opinions:
+
+| kind | when it fires |
+|---|---|
+| `rule-never-converts` | a rule reminded 3+ times and the skill never ran after it |
+| `gate-loop` | a session was denied 3+ times with no run of the skill the gate asked for |
+| `self-echo` | a reminder fired on a prompt that already was that skill's slash command |
+| `pattern-unused` | a `prompt` pattern matched nothing all window |
+| `version-regression` | a skill version came back `not-safe` more often than `safe` |
+
+`/skill-review` is the human half: it runs the self-check, reads this report,
+turns it into a judgment and a list of proposed edits, and files the window into
+Kyoung's knowledge graph. It proposes; it never edits a skill or this rule table
+on its own.
+
+## Reading it back (status.mjs)
+
+```bash
+node ~/claude-skills/router/status.mjs --md
+node ~/claude-skills/router/status.mjs --json --cwd ~/portfolio-html --log 20
+```
+
+The read-only console behind `/skill-router status`. It writes nothing at all,
+not even a directory, and reports: each of the four hook entries found or
+missing, with the checkout it actually runs from (the failure mode a bare "the
+hooks are in the file" check misses); the expected allow rules, present or not,
+with other `Skill(...)` allows counted separately; the rule table row by row;
+this repo's name from the common git dir, whether a `pre-commit` rule covers it,
+and its marker with the marker's age; the log tail across the rotated file; the
+record files by type; and the last self-check. It always prints the caveat that
+hooks are captured at session start, because from inside a process there is no
+way to tell whether the session predates the settings file.
+
 ## Files and knobs
 
 - `~/.claude/router-state/<session_id>.json`: session ledger (reminders sent, skills
@@ -273,9 +383,15 @@ the number that says whether an edit to a skill actually made it better.
 - `~/.claude/router-state/router.log`: one tab-separated line per decision, six
   columns (timestamp, event, rule id, repo, decision, detail), rotated to
   `router.log.1` at 1 MB.
+- `~/.claude/router-state/review-watermark.json`: `{"last": "<ISO>"}`, where the
+  last weekly review stopped. Written only by `report.mjs --mark`.
+- `~/.claude/skill-runs/router.jsonl`: the `health` records the session self-check
+  writes. It is the router's own buffer, not a skill's.
 - Env: `ROUTER_STATE_DIR`, `SKILL_RUNS_DIR`, `ROUTER_RULES` override the locations
   above and the rule file. The tests point the first two at temp directories, and the
   third at a temp rules file whenever a case needs a different table.
+  `SKILL_ROUTER_SELFCHECK=0` skips the session self-check; `SKILL_ROUTER_PROBE=1`
+  marks a process as one of its probes, which also skips it.
 - Every hook script exits 0 no matter what happens inside it. A bug can only switch
   the router off; it cannot break a session. A missing or unparseable rules file logs
   `rules-load-failed` and lets the call through. The test suite is the canary.

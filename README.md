@@ -18,10 +18,12 @@ projects; more follow as they earn it.
 | [`verify`](skills/verify/SKILL.md) | The pre-commit gate as one command: git state, typecheck, tests, and viewport screenshots at 390, 768 and 1440, reported as one honest PASS/FAIL table. Never says verified for a step that did not run. |
 | [`reuse-scout`](skills/reuse-scout/SKILL.md) | A pre-flight scan before building anything: what the repo already has for each capability, which twin is canonical, and where new code is actually justified. |
 | [`skill-router`](skills/skill-router/SKILL.md) | The operator end of the router. Says whether it is installed, which repos the commit gate covers, what the log decided and why a commit was denied, and installs or removes it behind an explicit yes. |
+| [`skill-review`](skills/skill-review/SKILL.md) | The Friday ritual. Proves the router still fires, aggregates the week's run records into one deterministic report, and turns it into proposed edits to the skills and the rule table. Proposes; never edits on its own. |
 
-There is also a [`router`](router/README.md): three hooks that make these fire on
-their own (a commit gate for `verify`, reminders for `reuse-scout`), and a local
-run record for every invocation so the skills can be tightened from evidence.
+There is also a [`router`](router/README.md): four hooks that make these fire on
+their own (a commit gate for `verify`, reminders for `reuse-scout`, a health
+check at every session start), and a local run record for every invocation so the
+skills can be tightened from evidence.
 
 ## Install
 
@@ -44,10 +46,12 @@ ln -sfn ~/claude-skills/skills/explain-diff ~/.claude/skills/explain-diff
 ln -sfn ~/claude-skills/skills/verify ~/.claude/skills/verify
 ln -sfn ~/claude-skills/skills/reuse-scout ~/.claude/skills/reuse-scout
 ln -sfn ~/claude-skills/skills/skill-router ~/.claude/skills/skill-router
+ln -sfn ~/claude-skills/skills/skill-review ~/.claude/skills/skill-review
 ```
 
-That gives you `/explain-diff`, `/verify`, `/reuse-scout` and `/skill-router`, and `git pull`
-updates them in place with no copies to drift. If the checkout lives outside your project, add it to
+That gives you `/explain-diff`, `/verify`, `/reuse-scout`, `/skill-router` and
+`/skill-review`, and `git pull` updates them in place with no copies to drift. If
+the checkout lives outside your project, add it to
 `permissions.additionalDirectories` in `~/.claude/settings.json` so the skill's
 reference files can be read without prompts.
 
@@ -57,7 +61,7 @@ To have the skills fire without being called, install the router too:
 node ~/claude-skills/router/install.mjs
 ```
 
-It adds three hooks, two allow rules, and one env var to `~/.claude/settings.json`
+It adds four hooks, four allow rules, and one env var to `~/.claude/settings.json`
 (a backup is written first) and can be removed with `--uninstall`. Before that
 first run, put your own repository names in `repo_groups` in
 `router/skill-rules.json`: the `web` group is where the commit gate applies, and
@@ -166,7 +170,9 @@ blind spot and an evidence-ladder fallback that skipped the session docs.
 
 - **v3** (2026-08-31). Two new skills, `verify` and `reuse-scout`, and the `router`:
   hooks that gate commits on a passing verify, remind about reuse-scout at the right
-  moment, and record every skill run to a local JSONL buffer.
+  moment, and record every skill run to a local JSONL buffer. Then the two skills
+  that close the loop over those records, `skill-router` and `skill-review`, plus
+  the session self-check that says when the router has gone quiet.
 - **v2.2** (2026-08-17). Translated to English for publication, and the parked
   polish batch applied: HTML escaping for `<`, `>`, and `&` in note text, the
   filename suffix rule spelled out, and the language rule generalized so the
