@@ -164,7 +164,7 @@ function md(o) {
   L.push(`records   ${o.records.present ? o.records.dir : `no records yet at ${o.records.dir}`}`);
   for (const f of o.records.files) L.push(`  ${f.file} · ${f.lines} lines · ${Object.entries(f.types).map(([t, n]) => `${t} ${n}`).join(' · ')}`);
   L.push(`health    ${o.health ? `${o.health.ts} · ${o.health.ok ? 'ok' : 'FAILED'} · ${Object.keys(o.health.checks).length} checks · ${o.health.ms}ms` : 'no self-check has run yet'}`);
-  if (o.health) for (const f of o.health.failures) L.push(`  ${f.check}: ${f.reason}`);
+  if (o.health) for (const f of o.health.failures) L.push(`  ${f.informational ? '⚠️ ' : ''}${f.check}: ${f.reason}`);
   L.push('caveats');
   for (const c of o.caveats) L.push(`  - ${c}`);
   return L.join('\n');

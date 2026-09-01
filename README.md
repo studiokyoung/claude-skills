@@ -22,8 +22,8 @@ projects; more follow as they earn it.
 
 There is also a [`router`](router/README.md): four hooks that make these fire on
 their own (a commit gate for `verify`, reminders for `reuse-scout`, a health
-check at every session start), and a local run record for every invocation so the
-skills can be tightened from evidence.
+check when a session starts or resumes), and a local run record for every
+invocation so the skills can be tightened from evidence.
 
 ## Install
 

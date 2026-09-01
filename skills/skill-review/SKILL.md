@@ -94,7 +94,7 @@ What the sections mean:
 | `gate` allow/deny + cycles | the commit gate. `deny to allow cycles` is the real cost of the gate: how many denies it took, and how stale the marker was when it finally passed. |
 | `annotation` | what a run **missed**, added later by `debrief`. The only honest measure of whether a skill is getting better. |
 | `Candidates` | the deterministic proposals: threshold crossings, not opinions. |
-| `Health` | the self-check history. Failures here date the gaps in every other number. |
+| `Health` | the self-check history. Failures here date the gaps in every other number; the `notes:` line is the informational checks (the Node version today), worth one sentence, never a repair. |
 
 If the window is empty, the report says so. That is a finding: either the week
 was quiet or the router was off, and §1 already said which. Do not manufacture a
