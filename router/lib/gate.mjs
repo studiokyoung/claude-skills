@@ -1,11 +1,11 @@
 // ~/claude-skills/router/lib/gate.mjs
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { rulesFor, matchPath } from './rules.mjs';
 import { toplevel, fingerprint, readMarker } from './git.mjs';
 import { candidateSet } from './commit.mjs';
 import { hasRun } from './ledger.mjs';
+import { home } from './paths.mjs';
 
 // toplevel() returns a physical path; resolve the hook's cwd the same way so path.relative agrees.
 const realCwd = (c) => {
@@ -19,7 +19,7 @@ const PHANTOM = /^~|\$/;
 
 // A shell would have expanded `cd ~/x` before git ever ran, but the hook sees the literal text.
 // Only a leading ~ is recoverable here; a $VAR base stays unresolvable and relies on the fallback below.
-const expandHome = (p) => (p === '~' || p.startsWith('~/') ? path.join(process.env.HOME || os.homedir(), p.slice(1)) : p);
+const expandHome = (p) => (p === '~' || p.startsWith('~/') ? path.join(home(), p.slice(1)) : p);
 
 // A rule may carry no message; a deny must still say why.
 const denyMessage = (rule, why) => (rule.message ? String(rule.message).replace('{why}', why) : `verify gate: ${why}`);
@@ -29,7 +29,8 @@ export function decideCommit(loaded, input, parsed) {
   const cwd = realCwd(input.cwd);
   // The repo is the one the command itself targets (`git -C x`, or a preceding `cd x`) — not the
   // hook's cwd, which `cd repo && git commit` would otherwise let the gate read from the wrong repo.
-  const base = path.resolve(cwd, expandHome(c.base || c.cPath || '.'));
+  const eb = expandHome(c.base || c.cPath || '.');
+  const base = path.resolve(cwd, eb);
   // …but a base we cannot resolve (an unexpanded $VAR, or `cd web && cd ..` since cd does not compose)
   // must fall back to the hook's own repo. Reading it as "no repo" would silently allow the commit.
   const top = toplevel(base) || toplevel(cwd);
@@ -37,9 +38,12 @@ export function decideCommit(loaded, input, parsed) {
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
   if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo };
+  // The expanded bases must flow down too: candidateSet re-resolves each pathspec against its own
+  // base, and a raw `~/repo` there sends every path outside the repo — an empty, silently allowed set.
+  const adds = (parsed.adds || []).map((a) => ({ ...a, base: expandHome(a.base || '.') }));
   // null = a git listing failed. "Could not tell" is not "nothing to commit": skip both shortcuts
   // and let the marker decide.
-  const cand = candidateSet(top, c, parsed.adds, cwd);
+  const cand = candidateSet(top, { ...c, base: eb }, adds, cwd);
   if (cand) {
     if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo };
     if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo };

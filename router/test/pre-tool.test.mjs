@@ -190,3 +190,15 @@ test('an unresolvable or tilde cd base falls back to the hook repo (never out-of
   assert.equal(tilde.json && tilde.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(logOf(root), /\tcommit\tverify-commit-gate\tportfolio-html\tdeny\t/);
 });
+
+test('tilde cd from another repo gates an unstaged pathspec commit too', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  const other = makeRepo('Self-GraphDB');
+  const homeEnv = { ...env, HOME: path.dirname(dir) };
+  const r = runHook('pre-tool.mjs', bash(other.dir, 'cd ~/portfolio-html && git commit web/app/page.tsx -m "x"'), homeEnv);
+  assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny');
+  const ctrl = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir} && git commit web/app/page.tsx -m "x"`), env);
+  assert.equal(ctrl.json && ctrl.json.hookSpecificOutput.permissionDecision, 'deny');
+});
