@@ -76,7 +76,8 @@ intervenes.
 | git failed, so no fingerprint | deny | `fingerprint unavailable (git failed)` |
 | candidate set unknowable (command substitution) | falls through to the fingerprint check | one of the last four |
 
-The denial the model receives, verbatim:
+The denial the model receives (one line in the rule table, wrapped here
+for width):
 
 ```
 verify gate: no passing /verify for this exact tree (marker missing). Run the
@@ -91,7 +92,8 @@ committed" is mechanically blocked.
 
 At `UserPromptSubmit` the `prompt` rules are matched against the first 4000
 characters of the prompt; a hit injects one line into the model's context.
-You do not see it, the model does.
+You do not see it, the model does. It too is a single line, wrapped here for
+width:
 
 ```
 [skill-router] This prompt asks to build a component/hook/util/feature. Invoke
@@ -102,9 +104,8 @@ code: the repo probably already has part of this.
 - **reuse-scout** (all repos). Sentences like "버튼 컴포넌트 하나 만들어줘",
   "add a useDebounce hook", "결제 화면에 로딩 상태 추가해줘". Korean noun
   first and English verb first are both covered. Word boundaries and guards
-  keep "the build is failing on the login page", "이 화면도 추가로 확인해줘"
-  and "이번 스프린트 마감일 언제야?" out. Once per session, and silent once
-  reuse-scout has run.
+  keep "the build is failing on the login page" and "이 화면도 추가로
+  확인해줘" out. Once per session, and silent once reuse-scout has run.
 - **Backstop.** If the reminder was missed, the moment a file that does not
   exist yet is written under `components/ hooks/ lib/ utils/ modules/ app/
   screens/ features/`, by the `Write` tool or a `>` / `>>` / `tee` target,
@@ -112,7 +113,9 @@ code: the repo probably already has part of this.
   starting with `~` or containing `$` is unexpanded shell text and is skipped
   rather than spending the session's one reminder.
 - **save-memory** (Corp repos only). Wrap-up phrasing: "오늘은 여기까지,
-  정리하자", "let's wrap up". Silent once save-memory has run.
+  정리하자", "let's wrap up". Its own guard is where `마감일` lives, so "이번
+  스프린트 마감일 언제야?" does not match. Once per session, and silent once
+  save-memory has run.
 - **Self-echo guard.** A prompt containing `[skill-router]` is not evaluated
   at all, so the reminder's own words cannot re-trigger the rule that wrote
   them and burn the session's single reminder.
@@ -167,32 +170,39 @@ The run itself is never rewritten:
 {"type":"annotation","ref":"verify-20260901T055634Z-5504","repo":"portfolio-html","missed":"carousel mobile overflow","by":"debrief 2026-09-02","note":"tiles were desktop-only","id":"verify-20260901T055635Z-62d0","ts":"2026-09-01T01:56:35.158-04:00","skill":"verify"}
 ```
 
-And the session self-check writes one `health` line per session start into
-`~/.claude/skill-runs/router.jsonl`, which is the router's own buffer rather
-than a skill's:
+And the session self-check writes one `health` line per session start or
+resume into `~/.claude/skill-runs/router.jsonl`, which is the router's own
+buffer rather than a skill's:
 
 ```json
 {"type":"health","ok":true,"checks":{"settings":true,"rules":true,"probe.on-prompt":true,"probe.pre-tool":true,"probe.post-skill":true,"node":true},"ms":449,"node":"v22.14.0","router_dir":"/Users/kyounghoonkim/claude-skills/router","id":"router-20260901T055636Z-a30a","ts":"2026-09-01T01:56:36.126-04:00","skill":"router"}
 ```
 
-**Join keys.** `session_id` and `prompt_id` are on every line, which is what
-makes separate buffers joinable: a `remind` and a later `invoke` of the same
-skill in the same `session_id` is a reminder that converted. `id` is the
-line's own identifier and `ref` is how an annotation points at a run. `ts`
-is local time with an offset, while `router.log` is UTC, so the two are
-never added up without converting first.
+**Join keys.** `remind`, `invoke`, `gate` and `run` all carry `session_id`
+and `prompt_id`, which is what makes separate buffers joinable: a `remind`
+and a later `invoke` of the same skill in the same `session_id` is a reminder
+that converted. `annotation` and `health` carry neither: an annotation points
+at its run by `ref`, and a health line belongs to the router, not to a
+session. `id` is every line's own identifier. `ts` is local time with an
+offset, while `router.log` is UTC, so the two are never added up without
+converting first.
 
 **Privacy.** A prompt excerpt keeps the first 160 code points with
-whitespace collapsed, a command excerpt keeps 120 characters, and the whole
+whitespace collapsed, a command excerpt keeps 120 of them, and the whole
 prompt is never stored. Records live under `~/.claude/skill-runs/`, never
 inside a repo, and never leave the machine. The only thing `/verify` writes
 inside a repo is `.git/verify-pass`, which git ignores.
 
 ### 2.4 The session self-check
 
-`selfcheck.mjs` runs at every session start and answers the question the log
-cannot: is the router still wired, and does it still fire? Six checks, about
-half a second, silent while everything passes.
+`selfcheck.mjs` runs on `SessionStart`, when a session starts or is resumed
+into, and answers the question the log cannot: is the router still wired, and
+does it still fire? A `/clear` or a compaction fires `SessionStart` again
+inside a session whose install cannot have changed since the last check, so
+those two sources are skipped: no probes, no `health` record, no log line.
+Every other source runs, including one this router has never heard of, since
+an allowlist here is how a check goes quiet. Six checks, about half a second,
+silent while everything passes.
 
 | check | what it proves |
 |---|---|
@@ -201,23 +211,32 @@ half a second, silent while everything passes.
 | `probe.on-prompt` | the prompt hook still turns the reuse-scout rule's own `sample` sentence into a reminder |
 | `probe.pre-tool` | a new file under `components/` still draws the backstop, and an unverified commit in a gated repo is still denied |
 | `probe.post-skill` | a `Skill` call still lands in a session ledger |
-| `node` | Node 22 or newer (informational: it never flips the verdict) |
+| `node` | Node 22 or newer. Informational: it is recorded and counted, but it never flips the verdict, because nothing about the router is broken by an old Node |
 
 The three probes spawn the real hook scripts against a throwaway `HOME`,
 state directory, records directory and git checkout, with
 `SKILL_ROUTER_PROBE=1` set, so a probe can never write a real record and can
-never re-enter the check. The spawns run in parallel, which is what keeps the
-whole thing inside a session start budget.
+never re-enter the check. The four spawns run in parallel, which is what keeps
+the whole thing inside a session start budget. Building that throwaway
+checkout can itself fail (git missing, git failing, git hitting its timeout);
+when it does, `probe.pre-tool` says it could not build the checkout rather
+than reporting the commit gate broken, which is the one alarm this check must
+never invent.
 
-All green: nothing on stdout, one `health` record, one `health` log line. Any
-failure: one line into the session naming each failed check with its reason.
+All green: nothing on stdout, one `health` record, one `health` log line. A
+blocking failure: one line into the session naming each failed check with its
+reason, and the same list in the record. A note on its own, an informational
+check like `node` with nothing blocking behind it, is written into the record
+flagged `informational` and counted by the weekly report under Health, but it
+stays out of the session and leaves the verdict `ok`.
 
 ```
 [skill-router] self-check FAILED: settings (PostToolUse: post-skill.mjs not
 registered). Run /skill-router status; repair with /skill-router install.
 ```
 
-The same six checks on demand, as a table, exit 1 on any blocking failure:
+The same six checks on demand, as a table. Exit 1 on a blocking failure; a
+note alone prints a `⚠️` row under a `PASS` line and still exits 0:
 
 ```bash
 node ~/claude-skills/router/selfcheck.mjs --cli
@@ -293,19 +312,29 @@ totals · invoke 2 · remind 1 · run 1 · gate 2 · annotation 1
 ```
 
 Two details worth noticing in that output. The allow bucket says `verified 1`
-and not `verified 2026-09-01T01:56:33.062-04:00`: the gate writes the
+and not `verified 2026-09-01T01:56:33.615-04:00`: the gate writes the
 marker's own timestamp into its reason, so the report strips a trailing ISO
 timestamp before bucketing, otherwise every commit gets a bucket of its own
 and the column reads as noise. And `pattern-unused` fired for pattern #0
 because the sample prompt matched pattern #1, which is exactly the signal the
 candidate is for.
 
+The `Health` section counts the self-check history, and an informational
+check that rode along on a passing record is counted there too, on its own
+line, so a note nobody sees never stays unfixed:
+
+```
+## Health
+- self-check 1 ok · 0 failed
+  - notes: node 1
+```
+
 `Candidates` are threshold crossings, not opinions:
 
 | kind | when it fires |
 |---|---|
 | `rule-never-converts` | a rule reminded 3+ times and the skill never ran after it |
-| `gate-loop` | a session was denied 3+ times with no run of the skill the gate asked for |
+| `gate-loop` | a session was denied 3+ times with no invoke and no run of the skill the gate asked for |
 | `self-echo` | a reminder fired on a prompt that already was that skill's slash command |
 | `pattern-unused` | a `prompt` pattern matched nothing all window, in a window that actually entered its scope |
 | `version-regression` | a skill version came back `not-safe` more often than `safe`, over at least 3 runs |
@@ -336,6 +365,10 @@ a ritual a human triggers is more reliable than an automatic one nobody
 notices has stopped. What is automatic is *detection*, which is the part that
 fails silently otherwise.
 
+`/save-memory` ends by pointing at this ritual, and by writing its own `run`
+line: the skill layer's own memory is these records and the Friday review,
+not the auto-memory file.
+
 ### 2.6 The operator console: `/skill-router`
 
 Reports only what a command in that turn printed, from two read-only
@@ -344,15 +377,12 @@ programs.
 | subcommand | what it reads |
 |---|---|
 | (none), `status` | `status.mjs --md` then `selfcheck.mjs --cli` |
-| `log [n]` | `~/.claude/router-state/router.log`, plus `router.log.1` when the window reaches past a rotation |
+| `log [n]` | `~/.claude/router-state/router.log`, which rotates to `router.log.1` at 1 MB, so a window that reaches back far enough needs both |
 | `rules` | the status card's rule block; `skill-rules.json` when the exact regex matters |
-| `records [skill]` | the card's record counts, then a tail of `~/.claude/skill-runs/<skill>.jsonl` |
+| `records [skill]` | the card's record counts, then a tail of `<runs dir>/<skill>.jsonl`, with the directory taken from the status card rather than assumed |
 | `why-denied` | the `commit` + `deny` lines from both log files, decoded into a next move |
 | `install` / `uninstall` | `install.mjs --dry-run` first, then the real run after an explicit yes |
 | `doc` | this guide, the Korean one, and `router/README.md` |
-
-`/save-memory` points here too: the skill layer's own memory is these records
-and the Friday review, not the auto-memory file.
 
 ```bash
 node ~/claude-skills/router/status.mjs --md
@@ -376,7 +406,7 @@ self-check.
 | turn it off / back on | `install.mjs --uninstall` / `install.mjs` (backs the settings file up first) |
 | add or remove a gated repo | one directory basename in `repo_groups.web` in `router/skill-rules.json` |
 | add a reminder sentence | that file's rule `patterns` (case insensitive, Unicode), then run the suite |
-| find out why a skill went quiet | `~/.claude/router-state/router.log`, six columns: `ts · event · rule · repo · decision · why` |
+| find out why a skill went quiet | `~/.claude/router-state/router.log`, six columns: `ts · event · rule · repo · decision · why`; it rotates to `router.log.1` at 1 MB, so a window that reaches back far enough needs both |
 | run the canary | `cd ~/claude-skills && node --test 'router/test/*.test.mjs'` |
 
 Quote the glob: the bare directory form is read as a module path on Node 22
@@ -468,7 +498,8 @@ the fingerprint check, and a `null` fingerprint denies.
 A SHA-256 over the exact tree `/verify` saw:
 
 - `HEAD` (the sentinel `EMPTY` when the branch is unborn).
-- Each entry of `git status --porcelain=v1 -z -uall`, **normalized**: the
+- Each entry of `git status --porcelain=v1 -z --untracked-files=all`,
+  **normalized**: the
   status code collapsed to `D` (deleted) or `C` (changed), a rename unfolded
   into new path `C` plus old path `D`, then sorted. A `git add` that turns
   ` M` into `M ` therefore leaves the fingerprint alone.
@@ -529,9 +560,10 @@ by the prompt hook. That was measured with a probe session, not assumed.
 
 ### 3.6 Fail open, and what it costs
 
-- Every hook exits 0 with no output no matter what happens inside it. An
-  exit code other than 0 or 2 raises a notification at the user, so failure
-  has to be *quiet*. The worst a router bug can do is switch the router off.
+- Every hook exits 0 no matter what happens inside it, and a failure inside
+  one produces no output at all (the normal path still emits: a deny, an
+  `additionalContext`). An exit code other than 0 or 2 raises a notification
+  at the user, so failure has to be *quiet*. The worst a router bug can do is switch the router off.
 - stdout is written completely with `fs.writeSync` (macOS pipes are async, so
   `process.exit` right after a write can truncate it); stdin is abandoned
   after 2 seconds; the hook timeout is 5 seconds, 10 for the self-check.
@@ -564,7 +596,7 @@ by the prompt hook. That was measured with a probe session, not assumed.
   mark-pass.mjs         the CLI /verify calls: write the marker, or --clear
   install.mjs           idempotent settings merge (--dry-run, --uninstall)
   probe.mjs             raw hook payload logger
-  lib/io.mjs            failOpen · readStdin · emit · log with rotation
+  lib/io.mjs            failOpen · readStdin · emit · log, rotated at 1 MB
   lib/rules.mjs         table load · repo identity · scope · pattern matching
   lib/git.mjs           git plumbing · repo root · fingerprint · marker
   lib/commit.mjs        the parser: segments · cd/-C · pathspecs · globs
@@ -578,7 +610,7 @@ by the prompt hook. That was measured with a probe session, not assumed.
   lib/args.mjs          the tiny flag parser the CLIs share
   lib/entries.mjs       the hook registration table, shared by install and
                         selfcheck, so a health check cannot drift from it
-  test/*.test.mjs       150 tests: temp git repos and spawned hook processes
+  test/*.test.mjs       155 tests: temp git repos and spawned hook processes
 skills/verify/references/{mark-pass,record-run}.mjs   one-line shims
 skills/reuse-scout/references/record-run.mjs
 ```
@@ -604,8 +636,9 @@ next session, never the current one.
 ## 4. What the reinforcement loop eats
 
 The records exist to answer five questions, and each one is answered by a
-different join. This is the whole reason the buffers carry `session_id` and
-`prompt_id` on every line.
+different join. This is the whole reason `remind`, `invoke`, `gate` and `run`
+carry `session_id` and `prompt_id`; an annotation joins to its run by `ref`
+instead, and a health line belongs to the router rather than to a session.
 
 | question | what answers it |
 |---|---|
@@ -613,13 +646,13 @@ different join. This is the whole reason the buffers carry `session_id` and
 | Do reminders convert? | a `remind` followed by an `invoke` of the same skill in the same session. A `remind` with nothing after it is one the model ignored, and `pattern_index` plus `prompt_excerpt` say which pattern and which wording produced it, so a rule that never converts gets rewritten instead of guessed at. |
 | Does the gate cost rounds? | the `gate` lines replayed per session: deny, then a `run`, then an allow whose `marker_age_s` is the gap. `cycles` counts how often that happened and `median_denies_before_first_allow` how many denies it took. A long run of allows with `docs_only: true` says the gate is mostly waving documentation through and covering less than it looks. |
 | Is a new version of a skill better? | `run.version` grouped with the `annotation.missed` lines that point at those runs by `ref`. That ratio is the only honest measure of whether an edit to a `SKILL.md` improved anything. |
-| Is the router itself alive? | `health`. One line per session start, and the failures dated, so a week with no records can be told apart from a week the router was off. |
+| Is the router itself alive? | `health`. One line per session start or resume, and the failures dated, so a week with no records can be told apart from a week the router was off. A `/clear`-heavy week has fewer health lines than sessions, so read the count as checks run, not as sessions. |
 
 ### What is deliberately not captured
 
 - **Full prompts.** 160 code points, whitespace collapsed, and only for the
   prompt that actually produced a reminder.
-- **Commands.** 120 characters of the command that reached the gate.
+- **Commands.** 120 code points of the command that reached the gate.
 - **Transcripts, diffs, file contents: none.** The loop reads transcripts
   separately, through `debrief`, which is also what writes the `annotation`
   lines. Keeping them out of the buffers is what keeps the buffers small,
@@ -709,8 +742,8 @@ The pipeline:
 |---|---|
 | 13 | tasks, each independently reviewed |
 | ~14 | fix rounds, plus the final review, the wave and two micro fixes |
-| 50 | commits on `router` ahead of `main` before this docs commit |
-| 150 | tests, all green (`node --test 'router/test/*.test.mjs'`) |
+| 52 | commits on `router` ahead of `main` before this docs commit |
+| 155 | tests, all green (`node --test 'router/test/*.test.mjs'`) |
 | ≈5.7 h | agent runtime (≈62 dispatches, ≈5.2M tokens) |
 | ~40 min | Kyoung's own time, on decisions and approvals |
 
@@ -767,7 +800,8 @@ instead of three.
 ritual.** The second steer was that a router which quietly stops working is
 the real failure mode, and that a scheduled weekly loop is not the answer:
 detection must be automatic, reinforcement must be a human decision. That
-produced the `SessionStart` self-check with its four spawned probes,
+produced the `SessionStart` self-check with its three probes and four
+spawns,
 `report.mjs` and its deterministic candidates, `status.mjs` as a read-only
 console, the `/skill-router` operator skill and the `/skill-review` Friday
 ritual with its graph writes. It also produced the rule that a self-check

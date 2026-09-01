@@ -71,7 +71,7 @@ verify"는 기억이 아니라 기계가 강제해야 한다. 그리고 스킬�
 | git이 실패해 지문을 못 냄 | deny | `fingerprint unavailable (git failed)` |
 | 후보 집합을 알 수 없음 (명령 치환 등) | 지문 검사로 흘러감 | 위 넷 중 하나 |
 
-모델이 받는 거부 문장 그대로:
+모델이 받는 거부 문장 그대로(룰 테이블에선 한 줄, 여기선 폭에 맞춰 접었다):
 
 ```
 verify gate: no passing /verify for this exact tree (marker missing). Run the
@@ -86,7 +86,7 @@ verify skill first, then commit. Conscious override: SKIP_VERIFY=1 git commit
 
 프롬프트가 들어오는 순간(UserPromptSubmit) `prompt` 룰을 프롬프트 앞
 4000자에 대조하고, 맞으면 모델 컨텍스트에 한 줄을 넣는다. 사용자에겐 안
-보이고 모델만 읽는다.
+보이고 모델만 읽는다. 이것도 실제로는 한 줄이고, 여기선 폭에 맞춰 접었다:
 
 ```
 [skill-router] This prompt asks to build a component/hook/util/feature. Invoke
@@ -97,16 +97,16 @@ code: the repo probably already has part of this.
 - **reuse-scout** (모든 레포). "버튼 컴포넌트 하나 만들어줘",
   "add a useDebounce hook", "결제 화면에 로딩 상태 추가해줘" 같은 문장.
   한국어 명사-먼저와 영어 동사-먼저를 둘 다 본다. 단어 경계와 가드가 있어서
-  "the build is failing on the login page", "이 화면도 추가로 확인해줘",
-  "이번 스프린트 마감일 언제야?"엔 안 걸린다. 세션당 1회, 이미 reuse-scout를
-  돌렸으면 침묵.
+  "the build is failing on the login page", "이 화면도 추가로 확인해줘"엔 안
+  걸린다. 세션당 1회, 이미 reuse-scout를 돌렸으면 침묵.
 - **백스톱.** 리마인드를 놓쳤어도, `components/ hooks/ lib/ utils/ modules/
   app/ screens/ features/` 아래에 **없던 파일**을 Write하거나 `>` / `>>` /
   `tee`로 만들려는 순간 한 번 더 알린다. 차단 없이 컨텍스트 주입.
   `~`로 시작하거나 `$`가 든 타깃은 미확장 셸 텍스트라, 세션의 1회분을
   태우지 않고 건너뛴다.
 - **save-memory** (Corp 레포만). "오늘은 여기까지, 정리하자",
-  "let's wrap up" 류. 이미 돌았으면 침묵.
+  "let's wrap up" 류. `마감일` 가드가 사는 곳이 여기라서 "이번 스프린트
+  마감일 언제야?"엔 안 걸린다. 세션당 1회, 이미 돌았으면 침묵.
 - **자기-에코 가드.** 프롬프트에 `[skill-router]`가 들어 있으면 룰을 아예
   평가하지 않는다. 리마인드 문구가 다시 패턴에 걸려 세션의 1회분을 태우는
   걸 막는다.
@@ -157,30 +157,38 @@ code: the repo probably already has part of this.
 {"type":"annotation","ref":"verify-20260901T055634Z-5504","repo":"portfolio-html","missed":"carousel mobile overflow","by":"debrief 2026-09-02","note":"tiles were desktop-only","id":"verify-20260901T055635Z-62d0","ts":"2026-09-01T01:56:35.158-04:00","skill":"verify"}
 ```
 
-그리고 세션 시작마다 셀프체크가 `~/.claude/skill-runs/router.jsonl`에
-`health` 한 줄을 쓴다. 스킬 버퍼가 아니라 라우터 자신의 버퍼다.
+그리고 세션이 시작되거나 재개될 때마다 셀프체크가
+`~/.claude/skill-runs/router.jsonl`에 `health` 한 줄을 쓴다. 스킬 버퍼가
+아니라 라우터 자신의 버퍼다.
 
 ```json
 {"type":"health","ok":true,"checks":{"settings":true,"rules":true,"probe.on-prompt":true,"probe.pre-tool":true,"probe.post-skill":true,"node":true},"ms":449,"node":"v22.14.0","router_dir":"/Users/kyounghoonkim/claude-skills/router","id":"router-20260901T055636Z-a30a","ts":"2026-09-01T01:56:36.126-04:00","skill":"router"}
 ```
 
-**조인 키.** `session_id`와 `prompt_id`가 모든 줄에 있어서 서로 다른 버퍼가
-붙는다. 같은 `session_id` 안에서 `remind` 뒤에 같은 스킬의 `invoke`가 오면
-전환된 리마인드다. `id`는 그 줄 자신의 식별자이고, `ref`는 annotation이 런을
-가리키는 방식이다. `ts`는 오프셋 붙은 로컬 시간이고 `router.log`는 UTC라,
-둘을 변환 없이 섞으면 한 시간 차이가 동시로 보인다.
+**조인 키.** `remind`·`invoke`·`gate`·`run`엔 `session_id`와 `prompt_id`가
+있어서 서로 다른 버퍼가 붙는다. 같은 `session_id` 안에서 `remind` 뒤에 같은
+스킬의 `invoke`가 오면 전환된 리마인드다. **`annotation`과 `health`엔 둘 다
+없다.** annotation은 `ref`로 런을 가리키고, health는 세션이 아니라 라우터
+자신의 줄이다. `id`는 모든 줄이 갖는 자기 식별자. `ts`는 오프셋 붙은 로컬
+시간이고 `router.log`는 UTC라, 둘을 변환 없이 섞으면 한 시간 차이가 동시로
+보인다.
 
 **프라이버시.** 프롬프트 발췌는 공백을 접은 앞 **160 코드포인트**, 명령
-발췌는 120자, 프롬프트 전문은 절대 저장하지 않는다. 기록은
+발췌는 같은 방식으로 **120 코드포인트**, 프롬프트 전문은 절대 저장하지
+않는다. 기록은
 `~/.claude/skill-runs/` 아래에만 있고 레포엔 안 들어가며 기기 밖으로 안
 나간다. `/verify`가 레포 안에 쓰는 건 git이 무시하는 `.git/verify-pass`
 하나뿐이다.
 
 ### 2.4 세션 셀프체크
 
-`selfcheck.mjs`가 세션 시작마다 돌면서 로그가 답할 수 없는 질문에 답한다:
-라우터가 아직 물려 있고, 아직 발동하는가. 체크 6개, 약 0.5초, 다 통과면
-침묵.
+`selfcheck.mjs`는 `SessionStart`에서, 세션이 **시작되거나 재개될 때** 돌면서
+로그가 답할 수 없는 질문에 답한다: 라우터가 아직 물려 있고, 아직 발동하는가.
+`/clear`와 압축은 같은 세션 안에서 `SessionStart`를 다시 쏘는 것이고 그 사이
+설치가 바뀔 수 없으므로 그 둘만 건너뛴다: 프로브도, `health` 기록도, 로그
+줄도 없다. 나머지 source는 라우터가 모르는 값이라도 전부 돈다(여기서
+허용목록을 쓰는 게 체크가 조용해지는 방법이니까). 체크 6개, 약 0.5초, 다
+통과면 침묵.
 
 | 체크 | 증명하는 것 |
 |---|---|
@@ -189,22 +197,29 @@ code: the repo probably already has part of this.
 | `probe.on-prompt` | 프롬프트 훅이 reuse-scout 룰 자신의 `sample` 문장을 아직 리마인드로 바꿈 |
 | `probe.pre-tool` | `components/` 아래 새 파일이 아직 백스톱을 부르고, 게이트 레포의 미검증 커밋이 아직 거부됨 |
 | `probe.post-skill` | `Skill` 호출이 아직 세션 원장에 남음 |
-| `node` | Node 22 이상 (informational: 판정을 뒤집지 않음) |
+| `node` | Node 22 이상. informational이라 기록되고 카운트되지만 판정은 절대 뒤집지 않는다. Node가 낡았다고 라우터가 깨진 건 아니니까 |
 
 프로브 셋은 임시 `HOME`, 임시 상태/기록 디렉토리, 임시 git 체크아웃에
 `SKILL_ROUTER_PROBE=1`을 걸고 **진짜 훅 스크립트를 스폰**한다. 그래서 프로브가
-진짜 기록을 쓸 수도, 체크에 재진입할 수도 없다. 스폰은 병렬이고, 그게
-세션 시작 예산 안에 들어가는 이유다.
+진짜 기록을 쓸 수도, 체크에 재진입할 수도 없다. 스폰 4개는 병렬이고, 그게
+세션 시작 예산 안에 들어가는 이유다. 그 임시 체크아웃을 만드는 것 자체가
+실패할 수도 있는데(git이 없거나, 실패하거나, timeout에 걸리거나), 그때
+`probe.pre-tool`은 커밋 게이트가 깨졌다고 보고하지 않고 **체크아웃을 못
+만들었다**고 말한다. 이 체크가 절대 만들어내면 안 되는 경보가 그거다.
 
-전부 통과: stdout 무출력, `health` 기록 한 줄, 로그 한 줄. 하나라도 실패:
-실패한 체크와 이유를 담은 한 줄이 세션에 들어간다.
+전부 통과: stdout 무출력, `health` 기록 한 줄, 로그 한 줄. **블로킹 실패**:
+실패한 체크와 이유를 담은 한 줄이 세션에 들어가고, 같은 목록이 기록에도
+남는다. **노트만 있을 때**(뒤에 블로킹이 없는 `node` 같은 informational
+체크)는 기록에 `informational` 표시로 남고 주간 리포트의 Health에 카운트되지만,
+세션엔 안 들어가고 판정도 `ok`로 남는다.
 
 ```
 [skill-router] self-check FAILED: settings (PostToolUse: post-skill.mjs not
 registered). Run /skill-router status; repair with /skill-router install.
 ```
 
-같은 체크를 표로 보고 싶을 때. 블로킹 실패가 있으면 exit 1.
+같은 체크를 표로 보고 싶을 때. 블로킹 실패가 있으면 exit 1, 노트만 있으면
+`PASS` 아래에 `⚠️` 줄이 찍히고 exit 0.
 
 ```bash
 node ~/claude-skills/router/selfcheck.mjs --cli
@@ -284,12 +299,22 @@ totals · invoke 2 · remind 1 · run 1 · gate 2 · annotation 1
 `pattern-unused`가 패턴 #0에 대해 떴는데, 샘플 프롬프트가 패턴 #1에 걸렸기
 때문이다. 그게 정확히 이 후보가 잡으라고 있는 신호다.
 
+`Health` 절은 셀프체크 이력을 센다. 통과한 기록에 얹혀 온 informational
+체크도 거기서 따로 한 줄로 세어지므로, 아무도 안 보는 노트가 영영 안 고쳐지는
+일이 없다:
+
+```
+## Health
+- self-check 1 ok · 0 failed
+  - notes: node 1
+```
+
 `Candidates`는 의견이 아니라 임계값 통과다.
 
 | 종류 | 언제 뜨나 |
 |---|---|
 | `rule-never-converts` | 룰이 3회 이상 리마인드했는데 그 뒤로 스킬이 한 번도 안 돎 |
-| `gate-loop` | 한 세션이 3회 이상 거부됐는데 게이트가 요구한 스킬이 안 돎 |
+| `gate-loop` | 한 세션이 3회 이상 거부됐는데 게이트가 요구한 스킬의 `invoke`도 `run`도 없음 |
 | `self-echo` | 이미 그 스킬의 슬래시 명령인 프롬프트에 리마인드가 발동 |
 | `pattern-unused` | `prompt` 패턴이 창 내내 아무것도 매치 못 함 (그 룰의 스코프에 실제로 들어간 창에서만) |
 | `version-regression` | 한 버전이 3런 이상에서 `safe`보다 `not-safe`가 많음 |
@@ -317,6 +342,9 @@ v1에 스케줄 루프는 없다. 누락이 아니라 결정이다: 자동 메�
 모르는 자동 루프보다 신뢰도가 높다. 자동이어야 하는 건 **감지**다. 그게
 그냥 두면 조용히 죽는 쪽이니까.
 
+`/save-memory`는 마지막에 이 의식을 가리키고, 자기 `run` 줄을 남기며 끝난다.
+스킬 계층의 기억은 오토메모리 파일이 아니라 이 기록들과 금요일 리뷰다.
+
 ### 2.6 운영 콘솔: `/skill-router`
 
 읽기 전용 프로그램 두 개가 **그 턴에** 찍은 것만 보고한다.
@@ -324,15 +352,12 @@ v1에 스케줄 루프는 없다. 누락이 아니라 결정이다: 자동 메�
 | 서브커맨드 | 무엇을 읽나 |
 |---|---|
 | (없음), `status` | `status.mjs --md` 다음 `selfcheck.mjs --cli` |
-| `log [n]` | `~/.claude/router-state/router.log`, 회전을 넘어가야 하면 `router.log.1`까지 |
+| `log [n]` | `~/.claude/router-state/router.log`. 1 MB에서 `router.log.1`로 회전하므로, 멀리 거슬러 가는 창은 둘 다 필요 |
 | `rules` | 상태 카드의 룰 블록, 정규식 원문이 필요하면 `skill-rules.json` |
-| `records [skill]` | 카드의 타입별 카운트, 그다음 `~/.claude/skill-runs/<skill>.jsonl` 꼬리 |
+| `records [skill]` | 카드의 타입별 카운트, 그다음 `<runs dir>/<skill>.jsonl` 꼬리. 디렉토리는 짐작하지 말고 상태 카드에서 가져온다 |
 | `why-denied` | 두 로그 파일의 `commit` + `deny` 줄을 다음 행동으로 해독 |
 | `install` / `uninstall` | 먼저 `install.mjs --dry-run`, 명시적 yes 뒤에만 실행 |
 | `doc` | 이 가이드, 영어판, `router/README.md` |
-
-`/save-memory`도 여기를 가리킨다. 스킬 계층의 기억은 오토메모리 파일이 아니라
-이 기록들과 금요일 리뷰다.
 
 ```bash
 node ~/claude-skills/router/status.mjs --md
@@ -354,7 +379,7 @@ node ~/claude-skills/router/status.mjs --json --cwd ~/portfolio-html --log 20
 | 끄기 / 다시 켜기 | `install.mjs --uninstall` / `install.mjs` (설정 백업 먼저) |
 | 게이트 레포 추가·제거 | `router/skill-rules.json`의 `repo_groups.web`에 디렉토리 basename 한 줄 |
 | 리마인드 문장 추가 | 같은 파일의 룰 `patterns` (대소문자 무시, 유니코드), 그다음 스위트 |
-| 스킬이 조용해졌을 때 | `~/.claude/router-state/router.log`, 6열: `ts · event · rule · repo · decision · why` |
+| 스킬이 조용해졌을 때 | `~/.claude/router-state/router.log`, 6열: `ts · event · rule · repo · decision · why`. 1 MB에서 `router.log.1`로 회전 |
 | 캐너리 돌리기 | `cd ~/claude-skills && node --test 'router/test/*.test.mjs'` |
 
 글롭은 따옴표로 감싼다. 맨 디렉토리 형태는 Node 22가 모듈 경로로 읽어서
@@ -444,7 +469,8 @@ flowchart TD
 `/verify`가 본 그 트리의 SHA-256. 재료:
 
 - `HEAD` (unborn이면 센티넬 `EMPTY`).
-- `git status --porcelain=v1 -z -uall`의 각 항목을 **정규화**한 줄. 상태
+- `git status --porcelain=v1 -z --untracked-files=all`의 각 항목을
+  **정규화**한 줄. 상태
   코드를 `D`(삭제)/`C`(변경)로 접고, rename은 새 경로 `C` + 옛 경로 `D`로
   편 뒤 정렬. 그래서 `git add`로 ` M`이 `M `가 돼도 지문은 그대로다.
 - `HEAD`에 있는 파일은 **내용**(`git hash-object --stdin-paths`의 블롭
@@ -501,9 +527,10 @@ pathspec이 레포 밖으로 새지 않는다.
 
 ### 3.6 fail-open 계약과 비용
 
-- 모든 훅은 내부에서 무슨 일이 나도 exit 0, 무출력. 0/2 외의 종료코드는
-  사용자에게 알림이 뜨므로 실패는 조용해야 한다. 라우터 버그의 최악은
-  라우터가 꺼지는 것이다.
+- 모든 훅은 내부에서 무슨 일이 나도 exit 0이고, **훅 안에서 실패하면 출력이
+  아예 없다**(정상 경로에선 물론 낸다: deny, `additionalContext`). 0/2 외의
+  종료코드는 사용자에게 알림이 뜨므로 실패는 조용해야 한다. 라우터 버그의
+  최악은 라우터가 꺼지는 것이다.
 - stdout은 `fs.writeSync`로 끝까지 쓴다(macOS 파이프는 비동기라 쓰기 직후
   `process.exit`가 자를 수 있다). stdin은 2초 뒤 포기. 훅 timeout은 5초,
   셀프체크만 10초.
@@ -535,7 +562,7 @@ pathspec이 레포 밖으로 새지 않는다.
   mark-pass.mjs         /verify가 부르는 CLI: 마커 쓰기 또는 --clear
   install.mjs           settings.json 멱등 병합 (--dry-run, --uninstall)
   probe.mjs             훅 페이로드 원문 로거
-  lib/io.mjs            failOpen · readStdin · emit · log(회전)
+  lib/io.mjs            failOpen · readStdin · emit · log(1 MB에서 회전)
   lib/rules.mjs         테이블 로드 · 레포 판정 · 스코프 · 패턴 매칭
   lib/git.mjs           git 플럼빙 · 레포 루트 · 지문 · 마커
   lib/commit.mjs        파서: 세그먼트 · cd/-C · pathspec · 글롭
@@ -549,7 +576,7 @@ pathspec이 레포 밖으로 새지 않는다.
   lib/args.mjs          CLI들이 공유하는 작은 플래그 파서
   lib/entries.mjs       훅 등록 테이블. install과 selfcheck가 공유해서
                         헬스체크가 자기가 검사하는 설치와 어긋날 수 없다
-  test/*.test.mjs       150 테스트: 임시 git 레포 + 훅 프로세스 스폰
+  test/*.test.mjs       155 테스트: 임시 git 레포 + 훅 프로세스 스폰
 skills/verify/references/{mark-pass,record-run}.mjs   1줄 심(shim)
 skills/reuse-scout/references/record-run.mjs
 ```
@@ -573,8 +600,10 @@ skills/reuse-scout/references/record-run.mjs
 
 ## 4. 강화 루프가 먹는 재료
 
-기록은 질문 다섯 개에 답하려고 존재하고, 각각 다른 조인이 답한다. 모든 줄이
-`session_id`와 `prompt_id`를 이고 다니는 이유가 이것이다.
+기록은 질문 다섯 개에 답하려고 존재하고, 각각 다른 조인이 답한다.
+`remind`·`invoke`·`gate`·`run`이 `session_id`와 `prompt_id`를 이고 다니는
+이유가 이것이다. annotation은 대신 `ref`로 자기 런에 붙고, health는 세션이
+아니라 라우터 자신의 줄이다.
 
 | 질문 | 무엇이 답하나 |
 |---|---|
@@ -582,13 +611,13 @@ skills/reuse-scout/references/record-run.mjs
 | 리마인드가 전환되나 | `remind` 뒤 같은 세션의 같은 스킬 `invoke`. 뒤가 비어 있으면 모델이 무시한 리마인드고, `pattern_index`와 `prompt_excerpt`가 어느 패턴·어느 문장이 그걸 만들었는지 말해준다. 그래서 전환 안 되는 룰은 추측이 아니라 재작성 대상이 된다 |
 | 게이트가 라운드를 잡아먹나 | 세션별로 재생한 `gate` 줄: deny, 그다음 `run`, 그다음 `marker_age_s`가 그 간격인 allow. `cycles`가 그게 몇 번 있었는지, `median_denies_before_first_allow`가 몇 번 거부 끝에 통과했는지. `docs_only: true` allow가 길게 이어지면 게이트가 문서만 흘려보내고 있고 보이는 것보다 덜 덮고 있다는 뜻 |
 | 스킬의 새 버전이 더 나은가 | `run.version`을 그 런들을 `ref`로 가리키는 `annotation.missed`와 묶은 비율. `SKILL.md` 수정이 실제로 나아지게 했는지에 대한 유일하게 정직한 척도 |
-| 라우터 자신이 살아 있나 | `health`. 세션 시작마다 한 줄, 실패는 날짜와 함께. 기록 없는 주가 "조용한 주"인지 "꺼져 있던 주"인지 구분된다 |
+| 라우터 자신이 살아 있나 | `health`. 세션 시작·재개마다 한 줄, 실패는 날짜와 함께. 기록 없는 주가 "조용한 주"인지 "꺼져 있던 주"인지 구분된다. `/clear`를 많이 쓴 주는 health 줄이 세션 수보다 적으니, 그 수는 **세션 수가 아니라 체크가 돈 횟수**로 읽는다 |
 
 ### 일부러 안 담는 것
 
 - **프롬프트 전문.** 공백 접은 앞 160 코드포인트만, 그것도 실제로 리마인드를
   만든 프롬프트에 한해서.
-- **명령.** 게이트에 닿은 명령의 앞 120자.
+- **명령.** 게이트에 닿은 명령의 앞 120 코드포인트.
 - **트랜스크립트·diff·파일 내용: 없음.** 루프는 트랜스크립트를 따로,
   `debrief`를 통해 읽고, 그게 `annotation` 줄을 쓰는 경로다. 버퍼에서
   빼두는 것이 버퍼를 작고 조인 가능하고 그래프 raw에 그대로 append해도
@@ -665,8 +694,8 @@ schema = SKILL.md 자체 + 버전. 그래프는 그 의식만 쓴다.
 |---|---|
 | 13 | 태스크, 각각 독립 리뷰 |
 | ~14 | 픽스 라운드 (+ 최종 리뷰, 웨이브, 마이크로 2) |
-| 50 | 이 문서 커밋 직전 `router`가 `main`보다 앞선 커밋 수 |
-| 150 | 테스트, 전부 통과 (`node --test 'router/test/*.test.mjs'`) |
+| 52 | 이 문서 커밋 직전 `router`가 `main`보다 앞선 커밋 수 |
+| 155 | 테스트, 전부 통과 (`node --test 'router/test/*.test.mjs'`) |
 | ≈5.7 h | 에이전트 가동 합 (≈62 디스패치, ≈5.2M 토큰) |
 | ~40 min | Kyoung 본인 시간 (결정·승인) |
 
@@ -713,7 +742,7 @@ dir로 식별), `docs/` 디렉토리 화이트리스트가 `docs/Widget.tsx`를 
 **라이브 이후 조타 2: 침묵은 스스로 감지돼야 하고, 루프는 의식이다.** 두 번째
 조타는, 조용히 멈춘 라우터가 진짜 실패 모드이고 주간 스케줄 루프는 그 답이
 아니라는 것이었다. 감지는 자동, 강화는 사람의 결정. 그래서 프로브 4개를
-스폰하는 `SessionStart` 셀프체크, `report.mjs`와 결정론적 후보, 읽기 전용
+3개(스폰은 4개) 돌리는 `SessionStart` 셀프체크, `report.mjs`와 결정론적 후보, 읽기 전용
 콘솔 `status.mjs`, `/skill-router` 운영 스킬, 그리고 그래프 쓰기를 포함한
 `/skill-review` 금요일 의식이 나왔다. 셀프체크가 스스로 수리하지 않는다는
 규칙도 여기서 나왔다. 무엇이 깨졌는지 말하고 명령을 알려줄 뿐이다.
