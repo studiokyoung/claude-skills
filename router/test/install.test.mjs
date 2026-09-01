@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { routerDir, tmpDir, testEnv } from './helpers.mjs';
+import { loadRules } from '../lib/rules.mjs';
 
 const run = (args, env = process.env) => spawnSync('node', [path.join(routerDir, 'install.mjs'), ...args], { encoding: 'utf8', env });
 const seed = () => {
@@ -36,6 +37,8 @@ test('install merges hooks/allow/env, keeps foreign entries, writes a backup, an
   assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].command, `node ${routerDir}/on-prompt.mjs`);
   assert.equal(s.hooks.PostToolUse[0].matcher, 'Skill');
   assert.equal(s.hooks.PostToolUse[0].hooks[0].command, `node ${routerDir}/post-skill.mjs`);
+  assert.equal(s.hooks.SessionStart[0].matcher, undefined);
+  assert.deepEqual(s.hooks.SessionStart[0].hooks, [{ type: 'command', command: `node ${routerDir}/selfcheck.mjs`, timeout: 10 }]);
   assert.equal(fs.readdirSync(dir).filter((f) => f.startsWith('settings.json.bak-')).length, 1);
   const again = run(['--settings', file]);
   assert.match(again.stdout, /nothing to change/);
@@ -56,6 +59,7 @@ test('dry-run writes nothing; uninstall removes only our entries', () => {
   assert.equal(s.hooks.PreToolUse.length, 1);
   assert.equal(s.hooks.UserPromptSubmit, undefined);
   assert.equal(s.hooks.PostToolUse, undefined);
+  assert.equal(s.hooks.SessionStart, undefined);
   assert.equal(s.env, undefined);
 });
 
@@ -137,4 +141,23 @@ test('install replaces a stale entry from a moved checkout instead of duplicatin
   const s = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.deepEqual(s.hooks.UserPromptSubmit[0].hooks.map((h) => h.command), [`node ${routerDir}/on-prompt.mjs`]);
+});
+
+test('a fresh install is exactly four hooks, the allow rules and the env var', () => {
+  const { env } = testEnv();
+  const file = path.join(tmpDir('settings-'), 'settings.json');
+  const d = run(['--settings', file, '--dry-run'], env);
+  assert.equal(d.status, 0, d.stderr);
+  const lines = d.stdout.trim().split('\n').slice(1).map((l) => l.trim());
+  assert.deepEqual(lines.filter((l) => l.startsWith('hooks.')), [
+    'hooks.UserPromptSubmit: added on-prompt.mjs',
+    'hooks.PreToolUse: added pre-tool.mjs',
+    'hooks.PostToolUse: added post-skill.mjs',
+    'hooks.SessionStart: added selfcheck.mjs',
+  ]);
+  assert.equal(lines.filter((l) => l.startsWith('permissions.allow:')).length, loadRules().allowSkills.length);
+  assert.equal(lines.filter((l) => l.startsWith('env:')).length, 1);
+  assert.equal(fs.existsSync(file), false);
+  run(['--settings', file], env);
+  assert.match(run(['--settings', file, '--dry-run'], env).stdout, /nothing to change/);
 });

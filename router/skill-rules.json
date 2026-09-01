@@ -28,6 +28,7 @@
         "(?:\\b(?:re)?build\\b(?!\\s*(?:(?:is|was|isn|fails?|failing|failed|broke|broken|error|passed|succeeded)\\b|깨|실패|에러|통과))|\\b(?:add|create|implement|scaffold)\\b|만들|추가(?!로|적)|구현(?!된|됐어|되어 있|되었)|(?<![가-힣])짜(?!증))[^\\n]{0,40}(?:\\b(?:components?|hooks?|utils?|helpers?|pages?|screens?|features?|modals?|buttons?|forms?)\\b|컴포넌트|훅|페이지|화면|기능|모달|버튼|폼)",
         "(?:\\b(?:components?|hooks?|utils?|helpers?|pages?|screens?|features?|modals?|buttons?|forms?)\\b|컴포넌트|훅|페이지|화면|기능|모달|버튼|폼)[^\\n]{0,40}(?:\\b(?:re)?build\\b(?!\\s*(?:(?:is|was|isn|fails?|failing|failed|broke|broken|error|passed|succeeded)\\b|깨|실패|에러|통과))|\\b(?:add|create|implement|scaffold)\\b|만들|추가(?!로|적)|구현(?!된|됐어|되어 있|되었)|(?<![가-힣])짜(?!증))"
       ],
+      "sample": "버튼 컴포넌트 하나 만들어줘",
       "message": "This prompt asks to build a component/hook/util/feature. Invoke the reuse-scout skill FIRST and cite its manifest before designing or writing code: the repo probably already has part of this."
     },
     {

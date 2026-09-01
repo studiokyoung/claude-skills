@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from './lib/args.mjs';
 import { routerDir } from './lib/paths.mjs';
+import { HOOK_ENTRIES } from './lib/entries.mjs';
 import { loadRules } from './lib/rules.mjs';
 
 const argv = process.argv.slice(2);
@@ -27,11 +28,6 @@ const a = parseArgs(argv);
 if (a.settings === true) { console.error('router: --settings needs a path'); process.exit(2); }
 const settingsPath = path.resolve(typeof a.settings === 'string' ? a.settings : path.join(os.homedir(), '.claude', 'settings.json'));
 const R = routerDir();
-const ENTRIES = [
-  { event: 'UserPromptSubmit', matcher: null, script: 'on-prompt.mjs' },
-  { event: 'PreToolUse', matcher: 'Bash|Write', script: 'pre-tool.mjs' },
-  { event: 'PostToolUse', matcher: 'Skill', script: 'post-skill.mjs' },
-];
 const ALLOW = loadRules().allowSkills.map((s) => `Skill(${s})`);
 const ENV = { SKILL_RUNS_DIR: path.join(os.homedir(), '.claude', 'skill-runs') };
 const uninstall = a.uninstall === true;
@@ -45,7 +41,7 @@ const changes = [];
 const isOurs = (h) => h && typeof h.command === 'string' && h.command.startsWith(`node ${R}/`);
 
 settings.hooks ||= {};
-for (const { event, matcher, script } of ENTRIES) {
+for (const { event, matcher, script, timeout } of HOOK_ENTRIES) {
   const list = settings.hooks[event] || [];
   if (uninstall) {
     const kept = [];
@@ -73,7 +69,7 @@ for (const { event, matcher, script } of ENTRIES) {
   if (replaced) { settings.hooks[event] = list; changes.push(`hooks.${event}: replaced ${script}`); continue; }
   const entry = {};
   if (matcher) entry.matcher = matcher;
-  entry.hooks = [{ type: 'command', command: `node ${R}/${script}`, timeout: 5 }];
+  entry.hooks = [{ type: 'command', command: `node ${R}/${script}`, timeout }];
   settings.hooks[event] = [...list, entry];
   changes.push(`hooks.${event}: added ${script}`);
 }

@@ -9,5 +9,6 @@ export const routerDir = () => path.resolve(path.dirname(fileURLToPath(import.me
 export const home = () => nonEmpty(process.env.HOME) || os.homedir();
 export const stateDir = () => nonEmpty(process.env.ROUTER_STATE_DIR) || path.join(home(), '.claude', 'router-state');
 export const runsDir = () => nonEmpty(process.env.SKILL_RUNS_DIR) || path.join(home(), '.claude', 'skill-runs');
+export const settingsPath = () => path.join(home(), '.claude', 'settings.json');
 export const rulesPath = () => nonEmpty(process.env.ROUTER_RULES) || path.join(routerDir(), 'skill-rules.json');
 export const skillsDir = () => path.join(routerDir(), '..', 'skills');
