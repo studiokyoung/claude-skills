@@ -12,8 +12,15 @@ import { routerDir, rulesPath, settingsPath } from './lib/paths.mjs';
 import { loadRules } from './lib/rules.mjs';
 import { appendRecord } from './lib/records.mjs';
 
+// The session starts worth re-checking: a real new session, or one being resumed into.
+const SOURCES = ['startup', 'resume'];
+
 const pass = (name, detail) => ({ name, ok: true, detail });
 const fail = (name, detail) => ({ name, ok: false, detail });
+// An informational check still lands in the record, so the number is there when somebody looks, but
+// it never flips the verdict: nothing about the router is broken because the node version is old.
+const note = (name, detail) => ({ name, ok: false, detail, informational: true });
+const blocking = (checks) => checks.filter((c) => !c.ok && !c.informational);
 
 // ---------------------------------------------------------------- static checks
 
@@ -66,7 +73,7 @@ function checkRules() {
 
 function checkNode() {
   const major = Number(process.versions.node.split('.')[0]);
-  return major >= 22 ? pass('node', process.version) : fail('node', `${process.version} is below the v22 the router is written for`);
+  return major >= 22 ? pass('node', process.version) : note('node', `${process.version} is below the v22 the router is written for`);
 }
 
 // ---------------------------------------------------------------- probes
@@ -126,7 +133,9 @@ function stageGateRepo(root, name) {
   const repo = path.join(root, 'repos', name);
   try {
     fs.mkdirSync(path.join(repo, 'app'), { recursive: true });
-    const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', timeout: 4000, stdio: 'ignore' });
+    // Two git calls plus the 5 s probe kill has to stay clear of the hook's 10 s timeout, and neither
+    // of these ever takes more than a few tens of milliseconds on a repo this size.
+    const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', timeout: 1500, stdio: 'ignore' });
     git('init', '-q');
     fs.writeFileSync(path.join(repo, 'app', 'probe.tsx'), 'export const probe = 1;\n');
     git('add', 'app/probe.tsx');
@@ -210,7 +219,7 @@ async function runChecks() {
 }
 
 function record(checks, ms) {
-  const failures = checks.filter((c) => !c.ok);
+  const failures = blocking(checks);
   const rec = {
     type: 'health',
     ok: failures.length === 0,
@@ -219,7 +228,10 @@ function record(checks, ms) {
     node: process.version,
     router_dir: routerDir(),
   };
-  if (failures.length) rec.failures = failures.map((c) => ({ check: c.name, reason: c.detail }));
+  // Every check that did not pass is written down, informational ones included; only the blocking
+  // ones set `ok` and reach the session.
+  const notPassing = checks.filter((c) => !c.ok);
+  if (notPassing.length) rec.failures = notPassing.map((c) => ({ check: c.name, reason: c.detail, informational: Boolean(c.informational) }));
   try { appendRecord('router', rec); } catch {}
   if (failures.length) log('health', '-', '-', 'fail', failures.map((c) => c.name).join(' '));
   else log('health', '-', '-', 'ok', `${checks.length} checks ${ms}ms`);
@@ -228,11 +240,13 @@ function record(checks, ms) {
 
 async function cli() {
   const { checks, ms } = await runChecks();
-  const failures = checks.filter((c) => !c.ok);
+  const failures = blocking(checks);
+  const notes = checks.filter((c) => !c.ok && c.informational);
   const pad = Math.max(...checks.map((c) => c.name.length));
   const lines = [`router self-check · ${routerDir()} · ${process.version}`];
-  for (const c of checks) lines.push(`${c.ok ? '✅' : '❌'} ${c.name.padEnd(pad)}  ${c.detail}`);
-  lines.push(failures.length ? `FAIL · ${failures.length} of ${checks.length} checks failed · ${ms}ms · repair with /skill-router install` : `PASS · ${checks.length} checks · ${ms}ms`);
+  for (const c of checks) lines.push(`${c.ok ? '✅' : c.informational ? '⚠️' : '❌'} ${c.name.padEnd(pad)}  ${c.detail}`);
+  const tail = notes.length ? ` · ${notes.length} note${notes.length === 1 ? '' : 's'}` : '';
+  lines.push(failures.length ? `FAIL · ${failures.length} of ${checks.length} checks failed · ${ms}ms${tail} · repair with /skill-router install` : `PASS · ${checks.length} checks · ${ms}ms${tail}`);
   process.stdout.write(lines.join('\n') + '\n');
   process.exit(failures.length ? 1 : 0);
 }
@@ -245,6 +259,10 @@ if (process.argv.slice(2).includes('--cli')) {
     if (process.env.SKILL_ROUTER_SELFCHECK === '0' || process.env.SKILL_ROUTER_PROBE === '1') return;
     const input = await readStdin();
     if (input && input.hook_event_name && input.hook_event_name !== 'SessionStart') return;
+    // A /clear or a compaction fires SessionStart again inside a session whose install cannot have
+    // changed since the last check, and the probes cost four spawns. A payload carrying no `source`
+    // at all still runs, so a bare invocation is never silently skipped.
+    if (input && input.source !== undefined && !SOURCES.includes(input.source)) return;
     const { checks, ms } = await runChecks();
     const failures = record(checks, ms);
     if (!failures.length) return;

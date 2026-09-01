@@ -23,7 +23,7 @@ allowed-tools:
   - Glob
   - Write(/Users/kyounghoonkim/Self-GraphDB/raw/skill-runs/**)
   - Write(/Users/kyounghoonkim/Self-GraphDB/graph/projects/**)
-  - Edit
+  - Edit(/Users/kyounghoonkim/Self-GraphDB/**)
 ---
 
 # skill review (the Friday ritual)
@@ -141,14 +141,26 @@ distilled wiki over them. Everything below happens in
 
 ```
 ls ~/Self-GraphDB/raw/skill-runs/ 2>/dev/null
+wc -l ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl        # the count you have to beat
 grep -o '"id":"[^"]*"' ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl | sort
 cat ~/.claude/skill-runs/<skill>.jsonl
 ```
 
-Take the lines whose `ts` is inside the report's window and whose `id` is not
-already in the destination, and write the destination as the old lines plus
-those, byte for byte as they came. `raw/` is immutable source material: never
-rewrite or reformat a line that is already there.
+`Write` replaces a file, so append safely and prove it:
+
+1. Read the destination in full (the `wc -l` above is the number to beat) and
+   collect the `id` values already in it.
+2. From the buffer, take the lines whose `ts` is inside the report's window and
+   whose `id` is **not** already there, byte for byte as they came.
+3. Write the destination **once**, as every old line in its original order
+   followed by the new ones.
+4. `wc -l` again. The count must have grown by exactly the number you appended.
+   **Fewer lines than before means you just destroyed raw source material**: stop,
+   say so, and restore from git (`git -C ~/Self-GraphDB checkout -- <path>`)
+   before doing anything else.
+
+`raw/` is immutable source material: never rewrite, reorder or reformat a line
+that is already there, and never drop one to make room.
 
 **4b. One node per tracked skill**, at `graph/projects/<skill>-skill.md`. Create
 it if missing, refresh it if it exists:
@@ -187,6 +199,27 @@ from that repo's `CLAUDE.md`; read it if anything here is ambiguous.
 skills live in it, that the router is the enforcement layer, and a link to each
 skill node. It carries a `현재 상태` block too (hub nodes always do), refreshed
 each review with the totals line.
+
+**On the review that creates it, give it an inbound link.** `INDEX.md` is a
+catalog, not an edge, so a node nothing links to is an orphan and the repo's
+`lint` will report it as one. One line is enough, in whichever of these the hub
+actually belongs under:
+
+- `me.md`, inside the `현재 상태` block, or
+- `graph/goals/personal-ai.md` (usually the better home: this is the tooling that
+  goal runs on)
+
+```
+[[claude-skills]] — the skill ecosystem; weekly /skill-review
+```
+
+Each `<skill>-skill.md` node is already reachable through its
+`edges: part_of: [claude-skills]`, so only the hub needs this. Name the file you
+put the line in when you report, and again in the `log.md` entry, so the next
+review can see the hub is anchored and does not add a second link. Before you
+finish §4, check the whole set once the way `lint` would: every node you created
+has at least one inbound link, no `edges: {}`, and no wikilink pointing at a node
+that does not exist.
 
 **4d. `INDEX.md`** gets one line under `## projects` for each node you created,
 in the existing format: `- [id](graph/projects/id.md) — <one-line hook>`.
@@ -245,8 +278,11 @@ already the rest of the graph.
 - Did you propose the SKILL.md / rule-table edits rather than making them, and is
   every candidate backed by a count from the report?
 - For the graph writes: is each `raw/skill-runs/` line byte-identical to the
-  buffer it came from, deduped by `id`? Was the `현재 상태` block replaced in
-  place and `강화 이력` only appended to?
+  buffer it came from, deduped by `id`? Did `wc -l` come back **larger** than
+  before, by exactly the number of lines you appended? Was the `현재 상태` block
+  replaced in place and `강화 이력` only appended to?
+- If you created the hub node this run, does something now link **to** it (and
+  does the report and the log entry say which file), so it is not an orphan?
 - Does every node say something about a **tool**, with no claim about Kyoung
   written in your own words?
 - Was `git status` shown and an explicit yes given before the commit, with

@@ -76,6 +76,8 @@ test('a missing PreToolUse entry fails the settings check and names it in the co
   assert.equal(h.checks.settings, false);
   assert.equal(h.checks['probe.pre-tool'], true);
   assert.ok(h.failures.some((f) => f.check === 'settings' && /PreToolUse/.test(f.reason)));
+  // a blocking failure, not an informational note: the flag is what keeps the node check out of the verdict
+  assert.deepEqual(h.failures.map((f) => f.informational), [false]);
   assert.match(fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8'), /\thealth\t-\t-\tfail\tsettings/);
 });
 
@@ -168,6 +170,30 @@ test('SKILL_ROUTER_SELFCHECK=0 and SKILL_ROUTER_PROBE=1 skip it entirely: no out
   writeSettings(probe.root, settingsFor(probe.root));
   assert.equal(runHook('selfcheck.mjs', start(), probe.env).stdout.trim(), '');
   assert.deepEqual(health(probe.root), []);
+});
+
+test('a /clear or a compaction does not re-run the probes; startup, resume and a bare payload do', () => {
+  for (const source of ['clear', 'compact']) {
+    const { root, env } = testEnv();
+    writeSettings(root, settingsFor(root));
+    const r = runHook('selfcheck.mjs', start({ source }), env);
+    assert.equal(r.status, 0, source);
+    assert.equal(r.stdout.trim(), '', source);
+    assert.deepEqual(health(root), [], `source ${source} must not spend four spawns`);
+  }
+  const resumed = testEnv();
+  writeSettings(resumed.root, settingsFor(resumed.root));
+  runHook('selfcheck.mjs', start({ source: 'resume' }), resumed.env);
+  assert.equal(health(resumed.root).length, 1);
+
+  // A payload that carries no source at all is still checked, so a bare invocation is never silently
+  // skipped by a Claude Code version that does not send one.
+  const bare = testEnv();
+  writeSettings(bare.root, settingsFor(bare.root));
+  const noSource = start();
+  delete noSource.source;
+  runHook('selfcheck.mjs', noSource, bare.env);
+  assert.equal(health(bare.root).length, 1);
 });
 
 test('--cli prints a table, exits 0 when green and 1 when not, and writes nothing', () => {

@@ -87,4 +87,13 @@ test('skill-review: the ritual in order, the graph conventions, and the no-edit 
   assert.match(t, /## 강화 이력/);
   assert.match(t, /report\.mjs --mark/);
   assert.match(t, /never\s+edits a skill or the rule table on its own/);
+  // the graph writes it must not get wrong: a scoped Edit, an append that is proved, and a hub node
+  // that is not left as an orphan for lint to find
+  assert.match(fm, /Edit\(\/Users\/kyounghoonkim\/Self-GraphDB\/\*\*\)/);
+  assert.doesNotMatch(fm, /^\s*- Edit\s*$/m);
+  assert.match(t, /must have grown by exactly the number you appended/);
+  assert.match(t, /Fewer lines than before/);
+  assert.match(t, /orphan/);
+  assert.match(t, /\[\[claude-skills\]\]/);
+  assert.ok(at(t, '**4c. The hub**') < at(t, '## 5. Mark the window'));
 });
