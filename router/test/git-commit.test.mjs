@@ -134,21 +134,29 @@ test('null contract: a failed listing is never an empty set', () => {
 });
 
 test('fingerprint: staging-neutral, mode-aware, fails closed when a file cannot be hashed', () => {
-  const { dir, git } = makeRepo('portfolio-html', { 'a.txt': 'aaaa' });
+  const { dir, git } = makeRepo('portfolio-html', { 'a.txt': 'aaaa', 'bad.txt': 'x' });
   fs.writeFileSync(path.join(dir, 'a.txt'), 'bbbb');
   const f1 = fingerprint(dir);
   git('add', 'a.txt');
   assert.equal(fingerprint(dir), f1);
   fs.chmodSync(path.join(dir, 'a.txt'), 0o755);
   assert.notEqual(fingerprint(dir), f1);
+  // An unreadable NEW file is stamped, never read, so it cannot fail the hash…
+  const fresh = path.join(dir, 'fresh.txt');
+  fs.writeFileSync(fresh, 'x');
+  fs.chmodSync(fresh, 0o000);
+  assert.equal(typeof fingerprint(dir), 'string');
+  fs.chmodSync(fresh, 0o644);
+  fs.unlinkSync(fresh);
+  // …but a TRACKED file the hasher cannot read fails closed: no hash over less than the whole tree.
   const bad = path.join(dir, 'bad.txt');
-  fs.writeFileSync(bad, 'x');
+  fs.writeFileSync(bad, 'xx');
   fs.chmodSync(bad, 0o000);
   assert.equal(fingerprint(dir), null);
   const { env } = testEnv();
   assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir]).json, { ok: false, reason: 'fingerprint-failed' });
   fs.chmodSync(bad, 0o644);
-  fs.unlinkSync(bad);
+  fs.writeFileSync(bad, 'x');
   const before = fingerprint(dir);
   git('mv', 'a.txt', 'b.txt');
   const after = fingerprint(dir);
@@ -188,4 +196,21 @@ test('command substitution in pathspec position makes the candidate set unknown,
   assert.equal(heredoc.isCommit, true);
   assert.deepEqual(heredoc.commit.paths, []);
   assert.ok(!heredoc.commit.unknown);
+});
+
+test('fingerprint: new files are stamped by size+mtime, tracked files by content', () => {
+  const { dir, git } = makeRepo('portfolio-html', { 'a.txt': 'aaaa' });
+  const u = path.join(dir, 'u.txt');
+  fs.writeFileSync(u, 'cccc');
+  const f0 = fingerprint(dir);
+  fs.writeFileSync(u, 'dddd'); // same size, later mtime
+  const f1 = fingerprint(dir);
+  assert.notEqual(f1, f0);
+  git('add', 'u.txt'); // staging a new file is not a tree change
+  assert.equal(fingerprint(dir), f1);
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'bbbb'); // tracked, same size: the blob hash moves it
+  const f2 = fingerprint(dir);
+  assert.notEqual(f2, f1);
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'bbbbb');
+  assert.notEqual(fingerprint(dir), f2);
 });

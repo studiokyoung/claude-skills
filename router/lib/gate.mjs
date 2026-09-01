@@ -1,7 +1,7 @@
 // ~/claude-skills/router/lib/gate.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { rulesFor, matchPath } from './rules.mjs';
+import { rulesFor, matchPath, repoOf } from './rules.mjs';
 import { toplevel, fingerprint, readMarker } from './git.mjs';
 import { candidateSet } from './commit.mjs';
 import { hasRun } from './ledger.mjs';
@@ -39,7 +39,9 @@ export function decideCommit(loaded, input, parsed) {
   // silently allow the commit. git then runs in the hook's cwd, so the pathspecs resolve there too:
   // keeping the outside base would push every path clear of `top` and empty the set into a silent allow.
   if (!top) { top = toplevel(cwd); eb = '.'; adds = adds.map((a) => ({ ...a, base: '.' })); }
-  const repo = top ? path.basename(top) : null;
+  // Identity comes from the main checkout (worktrees), while `top` stays the working tree the
+  // pathspecs, the marker and the fingerprint all belong to.
+  const repo = repoOf(top);
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
   if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo };
@@ -61,7 +63,7 @@ export function decideBackstop(loaded, ledger, input, targets) {
   if (!targets || targets.length === 0) return null;
   const cwd = realCwd(input.cwd);
   const top = toplevel(cwd);
-  const repo = top ? path.basename(top) : null;
+  const repo = repoOf(top);
   for (const rule of rulesFor(loaded, 'new-file', repo)) {
     if (rule.mode !== 'remind') continue;
     if (!rule.message) continue;

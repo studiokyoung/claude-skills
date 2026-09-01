@@ -25,6 +25,17 @@ export function toplevel(cwd) {
   return out ? out.trim() : null;
 }
 
+// Repo IDENTITY, which a linked worktree must share with its main checkout: the common git dir is
+// `<main>/.git` from inside either one, while `--show-toplevel` would name the worktree directory
+// and take it out of every repo group. Anything else (a bare repo, a submodule's `.git/modules/x`)
+// falls back to the toplevel. The MARKER stays on gitDir(), which is per-worktree by design.
+export function repoRoot(cwd) {
+  const out = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd);
+  const d = out ? out.trim() : null;
+  if (d && path.basename(d) === '.git') return path.dirname(d);
+  return toplevel(cwd);
+}
+
 export function gitDir(cwd) {
   const out = git(['rev-parse', '--git-dir'], cwd);
   if (!out) return null;
@@ -71,6 +82,14 @@ export function trackedModifiedPaths(cwd) {
   return out == null ? null : out.split('\0').filter(Boolean);
 }
 
+// Files hashed by size+mtime instead of content: anything not in HEAD (untracked `?`, added `A`),
+// and anything past this size. A new file's content is new by definition, so the cheap stamp is
+// enough to move the hash — and reading it is what costs: 456 MB of untracked PNGs in a real
+// checkout took ~2 s per gate and pushed the 4 s git timeout, which would jam the gate AND
+// mark-pass. The stamp stays staging-neutral, since `git add` does not touch the working file.
+const STAMP_BYTES = 8 * 1024 * 1024;
+const stampOnly = (xy, size) => xy.includes('?') || xy.includes('A') || size > STAMP_BYTES;
+
 // Content of the working tree, independent of staging: XY collapses to a change class (D/C) and the
 // lines are sorted, so `git add` between /verify and `git commit` is not a tree change; file modes
 // join the blob hashes so a chmod on an already-dirty file still moves it. Fails closed — any git
@@ -85,17 +104,20 @@ export function fingerprint(cwd) {
   const lines = [];
   const existing = [];
   const modes = [];
+  const stamps = [];
   for (const e of entries) {
     lines.push(`${e.xy.includes('D') ? 'D' : 'C'} ${e.path}`);
     if (e.orig) lines.push(`D ${e.orig}`);
     let st = null;
     try { st = fs.statSync(path.join(top, e.path)); } catch {}
     if (!st || !st.isFile()) continue;
-    existing.push(e.path);
     modes.push(`${(st.mode & 0o777).toString(8)} ${e.path}`);
+    if (stampOnly(e.xy, st.size)) stamps.push(`S ${st.size}:${st.mtimeMs} ${e.path}`);
+    else existing.push(e.path);
   }
   lines.sort();
   modes.sort();
+  stamps.sort();
   let hashes = '';
   if (existing.length) {
     const raw = git(['hash-object', '--stdin-paths'], top, { input: existing.join('\n') + '\n' });
@@ -106,6 +128,7 @@ export function fingerprint(cwd) {
   h.update(h0); h.update('\n');
   h.update(lines.join('\n')); h.update('\n');
   h.update(modes.join('\n')); h.update('\n');
+  h.update(stamps.join('\n')); h.update('\n');
   h.update(hashes);
   return h.digest('hex');
 }

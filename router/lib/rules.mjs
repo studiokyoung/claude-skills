@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { rulesPath } from './paths.mjs';
-import { toplevel } from './git.mjs';
+import { repoRoot } from './git.mjs';
 
 export function loadRules(file = rulesPath()) {
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -21,7 +21,7 @@ export function loadRules(file = rulesPath()) {
 }
 
 export function repoOf(cwd) {
-  const top = toplevel(cwd);
+  const top = repoRoot(cwd);
   return top ? path.basename(top) : null;
 }
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runHook, testEnv, makeRepo, hookInput } from './helpers.mjs';
-import { loadRules } from '../lib/rules.mjs';
+import { loadRules, repoOf } from '../lib/rules.mjs';
 
 const mode = loadRules().preToolUseContext;
 const bash = (cwd, command, over = {}) => hookInput({ cwd, tool_name: 'Bash', tool_input: { command }, ...over });
@@ -137,9 +137,13 @@ test('an unstaged pathspec commit is gated; from a subdirectory too', () => {
 
 test('git failure fails closed with an honest reason', () => {
   const { env } = testEnv();
-  const { dir } = dirty('portfolio-html');
+  const repo = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a', 'web/app/bad.txt': 'x' });
+  const dir = repo.dir;
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  repo.git('add', 'web/app/page.tsx');
+  // Tracked, so the fingerprint hashes its content and the unreadable file fails the whole hash.
   const bad = path.join(dir, 'web/app/bad.txt');
-  fs.writeFileSync(bad, 'x'); fs.chmodSync(bad, 0o000);
+  fs.writeFileSync(bad, 'xx'); fs.chmodSync(bad, 0o000);
   try {
     const r = runHook('pre-tool.mjs', bash(dir, 'git commit -am "x"'), env);
     assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
@@ -211,4 +215,15 @@ test('a cd to a non-repo (or failing cd) still gates pathspec commits in the hoo
     const r = runHook('pre-tool.mjs', bash(dir, cmd), env);
     assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny', cmd);
   }
+});
+
+test('a worktree is identified by its main repo, so a commit inside it is gated', () => {
+  const { env } = testEnv();
+  const { dir, git } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  const wt = path.join(path.dirname(dir), 'wt-feature');
+  git('worktree', 'add', '-q', wt);
+  assert.equal(repoOf(wt), 'portfolio-html');
+  fs.writeFileSync(path.join(wt, 'web/app/page.tsx'), 'a2');
+  const r = runHook('pre-tool.mjs', bash(wt, 'git commit web/app/page.tsx -m "x"'), env);
+  assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny');
 });
