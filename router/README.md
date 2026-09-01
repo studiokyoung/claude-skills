@@ -3,7 +3,9 @@
 Hooks that make the skills in this repo fire at the right moment, plus a local
 record of every run so the skills can be improved from evidence later.
 
-**Guides:** [`docs/GUIDE.md`](docs/GUIDE.md) (English) and [`docs/GUIDE.ko.md`](docs/GUIDE.ko.md) (한국어) walk the whole thing through; this file is the reference.
+**Guides:** [`docs/GUIDE.md`](docs/GUIDE.md) (English) and
+[`docs/GUIDE.ko.md`](docs/GUIDE.ko.md) (한국어) walk the whole thing through;
+this file is the reference.
 
 ## What it does
 
