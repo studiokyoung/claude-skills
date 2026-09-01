@@ -16,10 +16,11 @@ record of every run so the skills can be improved from evidence later.
   having run it, it is reminded once more (once per session).
 - **save-memory reminder.** In the repos under `repo_groups.corp`, wrap-up phrasing
   ("wrap up", "마감", ...) triggers a reminder to run `save-memory` if it has not run.
-- **run records.** Every successful invocation of a tracked skill is logged with how
-  it was triggered (typed by you, suggested by the router, or picked by the model),
-  every skill appends its outcome when it finishes, and `debrief` can append what a
-  run missed. One JSONL file per skill in `~/.claude/skill-runs/`. Run records never
+- **run records.** The evidence layer: every reminder the router delivers, every
+  commit decision the gate makes, every invocation of a tracked skill (with how it was
+  triggered: typed by you, suggested by the router, or picked by the model), the
+  outcome each skill appends when it finishes, and whatever `debrief` later says a run
+  missed. One JSONL file per skill in `~/.claude/skill-runs/`. Run records never
   touch a repo; the only thing `/verify` writes inside a repo is `.git/verify-pass`,
   which git ignores.
 
@@ -199,18 +200,33 @@ The gate is a floor for the common path, not a proof. Where it cannot see, the
 
 ## Run records
 
-`~/.claude/skill-runs/<skill>.jsonl`, one JSON object per line, three types:
+`~/.claude/skill-runs/<skill>.jsonl`, one JSON object per line, five types, here in
+the order a session produces them:
 
 ```json
+{"type":"remind","rule":"reuse-scout-prompt","delivery":"prompt","repo":"portfolio-html","session_id":"...","prompt_id":"...","pattern_index":1,"prompt_excerpt":"버튼 컴포넌트 하나 만들어줘","id":"reuse-scout-20260901T044743Z-2dd2","ts":"2026-09-01T00:47:43.227-04:00","skill":"reuse-scout"}
 {"type":"invoke","repo":"portfolio-html","session_id":"...","prompt_id":"...","trigger":"user","id":"verify-20260831T233001Z-3f2a","ts":"2026-08-31T19:30:01.412-04:00","skill":"verify"}
-{"type":"run","version":"1.1.0","repo":"portfolio-html","cwd":"/.../web","session_id":"...","session_inferred":true,"outcome":{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/"],"duration_s":84},"caught":[],"id":"verify-20260831T233105Z-9c1d","ts":"...","skill":"verify"}
+{"type":"gate","repo":"portfolio-html","session_id":"...","prompt_id":"...","decision":"deny","why":"marker missing","candidates":1,"docs_only":false,"marker_ts":null,"marker_age_s":null,"command_excerpt":"git commit -m \"feat: toast\"","id":"verify-20260901T044743Z-f6e8","ts":"...","skill":"verify"}
+{"type":"run","version":"1.1.0","repo":"portfolio-html","cwd":"/.../web","session_id":"...","session_inferred":true,"prompt_id":null,"git":{"head":"f60064b6da9e","branch":"main","changed":1},"outcome":{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/"],"duration_s":84},"caught":[],"id":"verify-20260831T233105Z-9c1d","ts":"...","skill":"verify"}
 {"type":"annotation","ref":"verify-20260831T233105Z-9c1d","repo":"portfolio-html","missed":"carousel mobile overflow","by":"debrief 2026-09-02","note":"tiles were desktop-only","id":"verify-20260902T140000Z-77aa","ts":"...","skill":"verify"}
 ```
 
+- `remind` is one line per reminder actually delivered, written into the buffer of
+  the skill it asked for. `delivery` is `prompt`, where `pattern_index` names which of
+  the rule's patterns matched and `prompt_excerpt` keeps the first 160 characters of
+  the prompt with whitespace collapsed, or `new-file`, where `target` is the
+  repo-relative path that was about to be created. The whole prompt is never stored.
 - `invoke` is written by the hooks. `trigger` is `user` (you typed the slash
   command, written by the prompt hook), `router` (a reminder for that skill fired
   earlier in the session) or `model` (the model picked the skill on its own); the
   last two are written by the `Skill` hook, for tracked skills only.
+- `gate` is one line per `git commit` decision a `pre-commit` rule was in scope for,
+  written into that rule's skill buffer. Out of scope means no gate stood there, so
+  nothing is written. `candidates` is how many paths the commit would have carried
+  (null when git could not list them), `docs_only` says the docs shortcut is what
+  allowed it, `marker_ts` and `marker_age_s` say which passing `/verify` was accepted
+  and how old it was, and `command_excerpt` keeps the first 120 characters of the
+  command.
 - `run` is written by the skill itself as its last step through `record-run.mjs`,
   which is the only run-record write in the system: no hook ever writes a `run`
   line, so an `invoke` with no `run` beside it is exactly what a skill that quit
@@ -218,18 +234,36 @@ The gate is a floor for the common path, not a proof. Where it cannot see, the
   `version` comes from the skill's `metadata.version`, so outcomes are comparable
   per skill version. Everything in `--json` except `caught` lands under `outcome`.
   `session_id` is inferred from the newest ledger for the same repo within the last
-  three hours, and `session_inferred` says whether one was found.
+  three hours, and `session_inferred` says whether one was found. `git` is the working
+  context of `--cwd` when the skill finished (short HEAD, branch, and how many paths
+  were dirty), all three null outside a repository so a missing tree never reads as a
+  clean one. `prompt_id` is null until a skill passes `--prompt-id`.
 - `annotation` is appended later (by `debrief`) and points at a run by `ref`.
   Records are never edited in place.
 
 ```bash
-node ~/claude-skills/router/record-run.mjs --skill verify --cwd <repo> --json '{"verdict":"safe","gates":{"git":"PASS"},"caught":[]}'
+node ~/claude-skills/router/record-run.mjs --skill verify --cwd <repo> [--prompt-id <id>] --json '{"verdict":"safe","gates":{"git":"PASS"},"caught":[]}'
 node ~/claude-skills/router/record-run.mjs --skill verify --type annotation --json '{"ref":"<run id>","missed":"...","by":"debrief 2026-09-02"}'
 ```
 
 It answers with the id and the file it appended to, and it never throws: a bad call
 comes back as `{"ok":false,"reason":"..."}` with `missing --skill`, `invalid --json`
 or, for an annotation, `missing ref`.
+
+### What the loop can compute from this
+
+Every line carries `repo`, `session_id` and `prompt_id`, which is what makes the
+buffers joinable. A `remind` followed by an `invoke` of the same skill in the same
+session is a reminder that converted; a `remind` with nothing after it is one the
+model ignored, and the excerpt plus the pattern index say which wording and which
+pattern produced it, so a rule that reminds and never converts can be rewritten
+instead of guessed at. The `gate` lines replay the deny, verify, allow cycle: a deny
+with `marker missing`, then a `run` with a safe verdict, then an allow whose
+`marker_age_s` is the gap between them, while a long stretch of allows with
+`docs_only` true says the gate is mostly waving documentation through and covering
+less than it looks. Grouping `run` lines by `version` and reading the `annotation`
+lines that point at them gives the catch and miss rate per skill version, which is
+the number that says whether an edit to a skill actually made it better.
 
 ## Files and knobs
 
