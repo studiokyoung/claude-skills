@@ -16,12 +16,19 @@ record of every run so the skills can be improved from evidence later.
   having run it, it is reminded once more (once per session).
 - **save-memory reminder.** In the repos under `repo_groups.corp`, wrap-up phrasing
   ("wrap up", "마감", ...) triggers a reminder to run `save-memory` if it has not run.
-- **run records.** Every invocation is logged with how it was triggered (typed by
-  you, suggested by the router, or picked by the model), every skill appends its
-  outcome when it finishes, and `debrief` can append what a run missed. One JSONL
-  file per skill in `~/.claude/skill-runs/`. Nothing is written into any repo.
+- **run records.** Every invocation of a tracked skill is logged with how it was
+  triggered (typed by you, suggested by the router, or picked by the model), every
+  skill appends its outcome when it finishes, and `debrief` can append what a run
+  missed. One JSONL file per skill in `~/.claude/skill-runs/`. Run records never
+  touch a repo; the only thing `/verify` writes inside a repo is `.git/verify-pass`,
+  which git ignores.
 
 ## Install
+
+First make the rules yours: open `router/skill-rules.json` and replace the
+repository names under `repo_groups` with your own (the `web` group is where the
+commit gate applies, the `corp` group is where the save-memory reminder does).
+Then:
 
 ```bash
 node ~/claude-skills/router/install.mjs             # merge into ~/.claude/settings.json (backup first)
@@ -75,8 +82,10 @@ version.
 - `event: prompt` matches `patterns` (case-insensitive, Unicode) against the first
   4000 characters of the prompt. `event: new-file` matches `paths` against the
   repo-relative path of a file that does not exist yet (the `Write` tool's
-  `file_path`, or a Bash `>` / `>>` / `tee` target). `event: pre-commit` fires on a
-  `git commit` in a Bash command.
+  `file_path`, or a Bash `>` / `>>` / `tee` target); a target starting with `~` or
+  containing `$` is unexpanded shell text rather than a literal path, so it is
+  skipped without spending the session's one reminder. `event: pre-commit` fires on
+  a `git commit` in a Bash command.
 - `mode: block` is only valid for `pre-commit`. Everything else is `remind`.
 - `once_per_session` and `unless_ran` read the session ledger in
   `~/.claude/router-state/<session_id>.json`.
@@ -139,8 +148,8 @@ hash computed over less than the whole tree.
 over `router/mark-pass.mjs`) only when its verdict is safe, and clears it otherwise:
 
 ```bash
-node router/mark-pass.mjs --root <repo> --gates '{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' --routes '["/","/work/x"]'
-node router/mark-pass.mjs --root <repo> --clear
+node ~/claude-skills/router/mark-pass.mjs --root <repo> --gates '{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' --routes '["/","/work/x"]'
+node ~/claude-skills/router/mark-pass.mjs --root <repo> --clear
 ```
 
 `--routes` is a JSON array, and a malformed one is an error rather than a null
@@ -153,7 +162,7 @@ failures it reports, each meaning no marker was written: `not-a-git-repo`,
 `~/.claude/skill-runs/<skill>.jsonl`, one JSON object per line, three types:
 
 ```json
-{"type":"invoke","repo":"portfolio-html","session_id":"...","prompt_id":"...","trigger":"user","id":"verify-20260831T233001Z-3f2a","ts":"2026-08-31T19:30:01-04:00","skill":"verify"}
+{"type":"invoke","repo":"portfolio-html","session_id":"...","prompt_id":"...","trigger":"user","id":"verify-20260831T233001Z-3f2a","ts":"2026-08-31T19:30:01.412-04:00","skill":"verify"}
 {"type":"run","version":"1.1.0","repo":"portfolio-html","cwd":"/.../web","session_id":"...","session_inferred":true,"outcome":{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/"],"duration_s":84},"caught":[],"id":"verify-20260831T233105Z-9c1d","ts":"...","skill":"verify"}
 {"type":"annotation","ref":"verify-20260831T233105Z-9c1d","repo":"portfolio-html","missed":"carousel mobile overflow","by":"debrief 2026-09-02","note":"tiles were desktop-only","id":"verify-20260902T140000Z-77aa","ts":"...","skill":"verify"}
 ```
@@ -171,8 +180,8 @@ failures it reports, each meaning no marker was written: `not-a-git-repo`,
   Records are never edited in place.
 
 ```bash
-node router/record-run.mjs --skill verify --cwd <repo> --json '{"verdict":"safe","gates":{"git":"PASS"},"caught":[]}'
-node router/record-run.mjs --skill verify --type annotation --json '{"ref":"<run id>","missed":"...","by":"debrief 2026-09-02"}'
+node ~/claude-skills/router/record-run.mjs --skill verify --cwd <repo> --json '{"verdict":"safe","gates":{"git":"PASS"},"caught":[]}'
+node ~/claude-skills/router/record-run.mjs --skill verify --type annotation --json '{"ref":"<run id>","missed":"...","by":"debrief 2026-09-02"}'
 ```
 
 It answers with the id and the file it appended to, and it never throws: a bad call
@@ -208,7 +217,8 @@ temp state directories, with `HOME` redirected too, so a run never touches your 
 
 `test/probe-settings.json` plus `probe.mjs` log raw hook payloads from a real
 session, which is how the `pretooluse_context` question gets answered for a given
-Claude Code version:
+Claude Code version. The settings file hard-codes my checkout, so edit its three
+`command` paths to point at yours before using it:
 
 ```bash
 claude -p --settings ~/claude-skills/router/test/probe-settings.json --allowedTools "Bash(echo:*)" "run: echo hi"
