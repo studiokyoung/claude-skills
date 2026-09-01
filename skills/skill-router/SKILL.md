@@ -17,7 +17,6 @@ allowed-tools:
   - Bash(ls:*)
   - Bash(grep:*)
   - Bash(wc:*)
-  - Bash(git rev-parse:*)
   - Bash(git status:*)
   - Read
   - Grep
@@ -82,8 +81,11 @@ rotated file, and record counts parsed per type. `--cwd <dir>` points it at
 another repo, `--log <n>` widens the tail.
 
 The second answers the question the card cannot: does the router still *fire*.
-Six checks, roughly half a second, exit 1 on any failure. Report its table as it
-printed, and when a check fails, its reason is the repair instruction.
+Six checks, roughly half a second. Report its table as it printed. A blocking
+failure is ❌, exits 1, and its reason is the repair instruction; an
+informational one is ⚠️, counted as a note in the last line, and never flips the
+verdict or the exit code (the Node version check is the informational one today).
+A ⚠️ is worth repeating to the user; it is not worth calling the router broken.
 
 Then read the card back in one or two lines. What each row means:
 
@@ -125,8 +127,12 @@ tail -n 20 ~/.claude/router-state/router.log
 so a window that reaches back far enough needs both, oldest file first:
 
 ```
-grep -h . ~/.claude/router-state/router.log.1 ~/.claude/router-state/router.log | tail -n 40
+grep -h . ~/.claude/router-state/router.log.1 ~/.claude/router-state/router.log 2>/dev/null | tail -n 40
 ```
+
+There is no `router.log.1` until the log first passes 1 MB, which is the normal
+state for a while: `2>/dev/null` is what keeps that expected absence out of the
+report, and its silence is not evidence of anything.
 
 Print the lines and then the legend. Do not paraphrase a line into a verdict, and
 do not restate its timestamp in another zone: the log is UTC ISO, the marker and
@@ -143,10 +149,10 @@ to go read in §4.
 | `prompt` | `user-invoked` (you typed the slash command), `remind` (a rule fired) |
 | `commit` | `allow` / `deny` from the verify gate |
 | `new-file` | `remind` (context injected) or `deny-once` (first attempt denied, retry passes) |
-| `skill` | `invoke` (a tracked skill ran), `skip`, `record-failed` |
+| `skill` | `invoke` (a tracked skill ran), `skip`, `record-failed`, `rules-load-failed` |
 | `records` | `record-failed`, `record-skipped` (the rule that decided names no skill, so there was no buffer to write to) |
 | `health` | `ok` / `fail` from the session self-check |
-| `rules` | `rules-load-failed` — the table did not parse, so everything was let through |
+| `rules` | `rules-load-failed` — the table did not parse, so everything was let through. The prompt and tool hooks log it under `rules`, the skill hook under `skill`, so a broken table shows up on both rows |
 
 The `why` column on a `commit` line is a fixed vocabulary. The first five are
 passes, the last three are the denials:
@@ -203,17 +209,23 @@ what to add, and let the change happen as a normal edit the suite then covers.
 
 ## 5. records [skill]
 
-Run records live in `~/.claude/skill-runs/<skill>.jsonl`, one JSON object per
-line, appended and never edited in place. The status card's `records` block is
-the count source (it parses each line and counts by type); when it says `no
-records yet at <dir>`, say exactly that — nothing has been recorded, which is not
-the same as the router being off, and a fresh install looks like this.
+Run records live in one `<skill>.jsonl` per skill, appended and never edited in
+place. **Take the directory from the status card, every time.** Its `records`
+row prints `SKILL_RUNS_DIR=<dir>` and its `records` block prints the directory
+being read; `~/.claude/skill-runs/` is only the default, and `SKILL_RUNS_DIR` in
+the settings file can point somewhere else. Reading the default while the router
+writes elsewhere produces a confident report about the wrong files, so the card is
+the single source of truth for this path.
 
-With a skill named, read the last few lines:
+That block is also the count source (it parses each line and counts by type). When
+it says `no records yet at <dir>`, say exactly that — nothing has been recorded,
+which is not the same as the router being off, and a fresh install looks like this.
+
+With a skill named, read the last few lines (`<runs dir>` is the card's path):
 
 ```
-tail -n 5 ~/.claude/skill-runs/<skill>.jsonl
-grep -c '"type":"gate"' ~/.claude/skill-runs/<skill>.jsonl
+tail -n 5 <runs dir>/<skill>.jsonl
+grep -c '"type":"gate"' <runs dir>/<skill>.jsonl
 ```
 
 `grep -c` exits 1 when it counts zero. That is a zero, not a failure.
@@ -228,9 +240,8 @@ Five types, one question each:
 | `run` | how did the run end (`outcome.verdict`, gates, `caught`) and on which skill `version` |
 | `annotation` | what did a finished run miss, appended later by `debrief`, pointing at it by `ref` |
 
-Plus one that is not a skill's: `health` lines in
-`~/.claude/skill-runs/router.jsonl`, one per session self-check, which is the
-router's own buffer.
+Plus one that is not a skill's: `health` lines in `<runs dir>/router.jsonl`, one
+per session self-check, which is the router's own buffer.
 
 Summarize the tail rather than dumping JSON walls: per line, the `ts`, the repo,
 and the one field that matters for its type. Offer the raw line if they want it.
@@ -246,8 +257,11 @@ Denials are `commit` lines with decision `deny`, and they may sit in the rotated
 file, so read both, oldest first:
 
 ```
-grep -h commit ~/.claude/router-state/router.log.1 ~/.claude/router-state/router.log | grep deny | tail -3
+grep -h commit ~/.claude/router-state/router.log.1 ~/.claude/router-state/router.log 2>/dev/null | grep deny | tail -3
 ```
+
+Same `2>/dev/null` as §3: `router.log.1` does not exist until the log first
+passes 1 MB, and that absence is expected, not a finding.
 
 No matching line: say exactly that, and say what it does not prove. The log
 rotates at 1 MB, so an old deny may no longer exist; and the gate only sees

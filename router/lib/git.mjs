@@ -86,7 +86,9 @@ export function trackedModifiedPaths(cwd) {
 // were dirty. Null wherever git could not answer, so "outside a repo" never reads as "clean tree".
 export function gitContext(cwd) {
   // head() answers the sentinel 'EMPTY' for an unborn HEAD, which a record must not carry as if it
-  // were a commit: nothing is committed yet, so the field is null while the branch still names itself.
+  // were a commit: nothing is committed yet, so the field is null. `--abbrev-ref HEAD` fails on an
+  // unborn HEAD too, so branch is null there as well, and `changed` is the only field that tells a
+  // fresh repo apart from no repo at all.
   const h = head(cwd);
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const entries = statusEntries(cwd);

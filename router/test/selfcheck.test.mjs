@@ -140,6 +140,20 @@ test('a rule with an unknown repo group, or a prompt rule with no message, fails
   assert.ok(hb.failures.some((f) => f.check === 'rules' && /message/.test(f.reason)));
 });
 
+test('a blocking gate rule with no skill fails the rules check', () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(routerDir, 'skill-rules.json'), 'utf8'));
+  const gate = raw.rules.find((x) => x.event === 'pre-commit' && x.mode === 'block');
+  delete gate.skill;
+  const file = path.join(tmpDir('rules-'), 'skill-rules.json');
+  fs.writeFileSync(file, JSON.stringify(raw));
+  const { root, env } = testEnv({ ROUTER_RULES: file });
+  writeSettings(root, settingsFor(root));
+  runHook('selfcheck.mjs', start(), env);
+  const h = health(root).at(-1);
+  assert.equal(h.checks.rules, false);
+  assert.ok(h.failures.some((f) => f.check === 'rules' && new RegExp(gate.id).test(f.reason) && /recorded nowhere/.test(f.reason)));
+});
+
 test('a hook script that throws fails its own probe and nothing else', () => {
   const { root, env } = testEnv();
   const copy = path.join(tmpDir('router-copy-'), 'router');

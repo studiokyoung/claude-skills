@@ -61,6 +61,9 @@ function checkRules() {
   const problems = [];
   for (const r of loaded.rules) {
     if ((r.event === 'prompt' || r.event === 'new-file') && !String(r.message || '').trim()) problems.push(`${r.id}: no message, so it can never fire`);
+    // It would still deny, but with no skill there is no buffer to write the gate record into, and
+    // pre-tool.mjs can only log that it skipped one: the decisions would vanish from the loop.
+    if (r.event === 'pre-commit' && r.mode === 'block' && !String(r.skill || '').trim()) problems.push(`${r.id}: a blocking gate rule with no skill, so its decisions are recorded nowhere`);
     const scope = r.repos ?? '*';
     if (typeof scope === 'string' && scope !== '*' && !(scope in loaded.repoGroups)) problems.push(`${r.id}: repo group "${scope}" is not in repo_groups`);
   }
