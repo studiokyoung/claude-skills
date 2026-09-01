@@ -25,8 +25,8 @@
       "once_per_session": true,
       "unless_ran": "reuse-scout",
       "patterns": [
-        "(만들|추가|붙|짜|구현|build|add|create|implement|write|scaffold)[^\\n]{0,40}(컴포넌트|component|훅|hook|util|helper|페이지|page|화면|screen|기능|feature|모달|modal|버튼|button|폼|form)",
-        "(컴포넌트|component|훅|hook|util|helper|페이지|page|화면|screen|기능|feature|모달|modal|버튼|button|폼|form)[^\\n]{0,40}(만들|추가|붙|짜|구현|build|add|create|implement|write|scaffold)"
+        "(?:\\bbuild\\b(?!\\s*(?:(?:is|was|isn|fails?|failing|failed|broke|broken|error|passed|succeeded)\\b|깨|실패|에러|통과))|\\b(?:add|create|implement|scaffold)\\b|만들|추가(?!로)|구현(?!된|됐|돼|되)|(?<![가-힣])짜(?!증))[^\\n]{0,40}(?:\\b(?:components?|hooks?|utils?|helpers?|pages?|screens?|features?|modals?|buttons?|forms?)\\b|컴포넌트|훅|페이지|화면|기능|모달|버튼|폼)",
+        "(?:\\b(?:components?|hooks?|utils?|helpers?|pages?|screens?|features?|modals?|buttons?|forms?)\\b|컴포넌트|훅|페이지|화면|기능|모달|버튼|폼)[^\\n]{0,40}(?:\\bbuild\\b(?!\\s*(?:(?:is|was|isn|fails?|failing|failed|broke|broken|error|passed|succeeded)\\b|깨|실패|에러|통과))|\\b(?:add|create|implement|scaffold)\\b|만들|추가(?!로)|구현(?!된|됐|돼|되)|(?<![가-힣])짜(?!증))"
       ],
       "message": "This prompt asks to build a component/hook/util/feature. Invoke the reuse-scout skill FIRST and cite its manifest before designing or writing code: the repo probably already has part of this."
     },
@@ -49,7 +49,7 @@
       "mode": "remind",
       "once_per_session": true,
       "unless_ran": "save-memory",
-      "patterns": ["(마감|정리하자|정리하고 끝|끝내자|끝내고|마무리|wrap.?up|오늘 여기까지|세션 끝|커밋하고 끝)"],
+      "patterns": ["(마감(?!일|기한|시간)|정리하자|정리하고 끝|끝내자|마무리하자|마무리하고 끝|\\bwrap[\\s-]?up\\b|오늘 여기까지|세션 끝|커밋하고 끝)"],
       "message": "Corp session is wrapping up and save-memory has not run. Invoke it before the session ends so this session's corrections and decisions are not lost."
     }
   ]

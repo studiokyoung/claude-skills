@@ -5,6 +5,7 @@ import path from 'node:path';
 import { loadRules, repoOf, inScope, rulesFor, matchPrompt, matchPath, knownSkills } from '../lib/rules.mjs';
 import { makeRepo, tmpDir } from './helpers.mjs';
 
+delete process.env.ROUTER_RULES;
 const loaded = loadRules();
 
 test('rule table loads with compiled patterns and the top-level keys', () => {
@@ -47,10 +48,22 @@ test('prompt patterns: Korean noun-first, English verb-first, and non-matches', 
   assert.equal(matchPrompt(r, '결제 화면에 로딩 상태 추가해줘'), true);
   assert.equal(matchPrompt(r, 'why is this test flaky?'), false);
   assert.equal(matchPrompt(r, 'handoff 읽고 쭉 가보자'), false);
+  assert.equal(matchPrompt(r, 'add a screenshot of the mobile viewport to the report'), false);
+  assert.equal(matchPrompt(r, 'the build is failing on the login page, find out why'), false);
+  assert.equal(matchPrompt(r, 'build 깨졌어, app/page.tsx 타입 에러 좀 봐줘'), false);
+  assert.equal(matchPrompt(r, 'why does the formatter add trailing commas?'), false);
+  assert.equal(matchPrompt(r, '이 화면도 추가로 확인해줘'), false);
+  assert.equal(matchPrompt(r, '이 기능 추가로 테스트해봐'), false);
+  assert.equal(matchPrompt(r, '컴포넌트 이름 옆에 주석 붙여줘'), false);
+  assert.equal(matchPrompt(r, 'write the handoff page for todays session'), false);
+  assert.equal(matchPrompt(r, 'update the shipping address validation'), false);
   const s = loaded.rules.find((x) => x.id === 'save-memory-wrapup');
   assert.equal(matchPrompt(s, '오늘은 여기까지, 정리하자'), true);
   assert.equal(matchPrompt(s, "let's wrap up"), true);
   assert.equal(matchPrompt(s, '이 함수 정리해줘'), false);
+  assert.equal(matchPrompt(s, '이번 스프린트 마감일 언제야?'), false);
+  assert.equal(matchPrompt(s, '이 버그만 끝내고 다음 태스크 가자'), false);
+  assert.equal(matchPrompt(s, 'the middleware wraps up the handler'), false);
 });
 
 test('path patterns for the new-file backstop', () => {
