@@ -1,5 +1,5 @@
 // ~/claude-skills/router/lib/prompt.mjs
-import { rulesFor, matchPrompt } from './rules.mjs';
+import { rulesFor, matchPromptIndex } from './rules.mjs';
 import { hasRun } from './ledger.mjs';
 import { normalizeSkill } from './records.mjs';
 
@@ -22,9 +22,10 @@ export function planReminders(loaded, ledger, repo, prompt) {
     if (!rule.message) continue;
     if (rule.once_per_session && ledger.reminded[rule.id]) continue;
     if (rule.unless_ran && hasRun(ledger, rule.unless_ran)) continue;
-    if (!matchPrompt(rule, prompt)) continue;
+    const patternIndex = matchPromptIndex(rule, prompt);
+    if (patternIndex < 0) continue;
     messages.push(`[skill-router] ${rule.message}`);
-    fired.push({ ruleId: rule.id, skill: rule.skill });
+    fired.push({ ruleId: rule.id, skill: rule.skill, patternIndex });
   }
   return { messages, fired };
 }

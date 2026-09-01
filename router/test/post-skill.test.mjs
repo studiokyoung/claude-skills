@@ -24,7 +24,9 @@ test('router-triggered: a prior reminder for the skill classifies the invoke as 
   runHook('on-prompt.mjs', hookInput({ hook_event_name: 'UserPromptSubmit', cwd: dir, session_id: 's-r', prompt_id: 'p1', prompt: '토스트 컴포넌트 만들어줘' }), env);
   runHook('post-skill.mjs', post({ session_id: 's-r', prompt_id: 'p1' }), env);
   assert.equal(ledgerOf(root, 's-r').skills_ran[0].trigger, 'router');
-  assert.equal(runsOf(root, 'reuse-scout')[0].trigger, 'router');
+  // The reminder now leaves its own record in the same buffer, ahead of the invoke it caused.
+  assert.deepEqual(runsOf(root, 'reuse-scout').map((x) => x.type), ['remind', 'invoke']);
+  assert.equal(runsOf(root, 'reuse-scout').find((x) => x.type === 'invoke').trigger, 'router');
 });
 
 test('user-triggered: same prompt_id as a typed /skill → trigger user and NO duplicate invoke line', () => {

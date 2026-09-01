@@ -16,6 +16,7 @@ const dirty = (name, rel = 'web/app/page.tsx') => {
   return r;
 };
 const logOf = (root) => fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8');
+const recsOf = (root, skill) => { try { return fs.readFileSync(path.join(root, 'runs', `${skill}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
 
 test('deny: web repo, staged code, no marker', () => {
   const { root, env } = testEnv();
@@ -261,4 +262,55 @@ test('a redirect after a cd is resolved under that cd, not the hook cwd', () => 
   assert.equal(quiet.stdout.trim(), '');
   const fires = runHook('pre-tool.mjs', bash(dir, `cd ${scratch.dir} && cat > web/components/New.tsx <<'EOF'\nx\nEOF`, { session_id: 's-cd2' }), env);
   assert.ok(fires.json, 'a genuinely new file under the cd base still reminds');
+});
+
+test('the new-file backstop writes one remind record per session, with the target it fired on', () => {
+  const { root, env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  const first = runHook('pre-tool.mjs', write(dir, path.join(dir, 'web/components/Toast.tsx'), { session_id: 's-nr', prompt_id: 'p2' }), env);
+  assert.ok(first.json);
+  const recs = recsOf(root, 'reuse-scout');
+  assert.equal(recs.length, 1);
+  const [rec] = recs;
+  assert.equal(rec.type, 'remind'); assert.equal(rec.skill, 'reuse-scout');
+  assert.equal(rec.rule, 'reuse-scout-new-file'); assert.equal(rec.delivery, 'new-file');
+  assert.equal(rec.target, 'web/components/Toast.tsx');
+  assert.equal(rec.repo, 'portfolio-html');
+  assert.equal(rec.session_id, 's-nr'); assert.equal(rec.prompt_id, 'p2');
+  assert.equal(rec.pattern_index, null);
+  assert.equal(rec.prompt_excerpt, undefined);
+  const again = runHook('pre-tool.mjs', write(dir, path.join(dir, 'web/components/Toast.tsx'), { session_id: 's-nr', prompt_id: 'p3' }), env);
+  assert.equal(again.stdout.trim(), '');
+  assert.equal(recsOf(root, 'reuse-scout').length, 1);
+});
+
+test('every in-scope commit decision writes a gate record; an out-of-scope one writes none', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const denied = runHook('pre-tool.mjs', bash(dir, 'git commit  -m   "feat"', { session_id: 's-g', prompt_id: 'pg' }), env);
+  assert.equal(denied.json.hookSpecificOutput.permissionDecision, 'deny');
+  const [no] = recsOf(root, 'verify');
+  assert.equal(no.type, 'gate'); assert.equal(no.skill, 'verify');
+  assert.equal(no.decision, 'deny'); assert.equal(no.why, 'marker missing');
+  assert.equal(no.candidates, 1); assert.equal(no.docs_only, false);
+  assert.equal(no.marker_ts, null); assert.equal(no.marker_age_s, null);
+  assert.equal(no.repo, 'portfolio-html'); assert.equal(no.session_id, 's-g'); assert.equal(no.prompt_id, 'pg');
+  assert.equal(no.command_excerpt, 'git commit -m "feat"');
+  runHook('mark-pass.mjs', null, env, ['--root', dir]);
+  assert.equal(runHook('pre-tool.mjs', bash(dir, 'git commit -m "feat"'), env).stdout.trim(), '');
+  const yes = recsOf(root, 'verify')[1];
+  assert.equal(yes.decision, 'allow');
+  assert.match(yes.why, /^verified /);
+  assert.ok(yes.marker_ts);
+  assert.equal(typeof yes.marker_age_s, 'number');
+  assert.ok(yes.marker_age_s >= 0);
+  const docs = makeRepo('portfolio-html', { 'README.md': 'r', 'web/app/page.tsx': 'a' });
+  fs.writeFileSync(path.join(docs.dir, 'README.md'), 'r2'); docs.git('add', 'README.md');
+  runHook('pre-tool.mjs', bash(docs.dir, 'git commit -m "docs"'), env);
+  const md = recsOf(root, 'verify')[2];
+  assert.equal(md.decision, 'allow'); assert.equal(md.why, 'docs-only');
+  assert.equal(md.docs_only, true); assert.equal(md.candidates, 1);
+  const other = dirty('Self-GraphDB', 'agents/keeper.sh');
+  assert.equal(runHook('pre-tool.mjs', bash(other.dir, 'git commit -m "x"'), env).stdout.trim(), '');
+  assert.equal(recsOf(root, 'verify').length, 3);
 });

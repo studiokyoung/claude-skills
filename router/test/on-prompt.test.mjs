@@ -9,6 +9,7 @@ import { detectUserSkill } from '../lib/prompt.mjs';
 const web = makeRepo('portfolio-html', { 'web/app/page.tsx': 'x' });
 const corp = makeRepo('corp-mobile', { 'app/index.tsx': 'x' });
 const prompt = (over) => hookInput({ hook_event_name: 'UserPromptSubmit', ...over });
+const recsOf = (root, skill) => { try { return fs.readFileSync(path.join(root, 'runs', `${skill}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
 
 test('detectUserSkill: raw slash, wrapped forms, unknown, plain text', () => {
   const known = ['verify', 'reuse-scout', 'save-memory', 'explain-diff'];
@@ -120,4 +121,36 @@ test('the router never reminds on its own echoed message', () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'state', 's-echo.json'), 'utf8')).reminded), []);
+});
+
+test('a firing prompt rule writes a remind record with the join keys, pattern index and an excerpt', () => {
+  const { root, env } = testEnv();
+  const text = `  버튼   컴포넌트   하나 만들어줘.\n${'상세한 배경 설명 '.repeat(20)}`;
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-rm', prompt_id: 'p4', prompt: text }), env);
+  assert.match(r.json.hookSpecificOutput.additionalContext, /reuse-scout/);
+  const recs = recsOf(root, 'reuse-scout');
+  assert.equal(recs.length, 1);
+  const [rec] = recs;
+  assert.equal(rec.type, 'remind'); assert.equal(rec.skill, 'reuse-scout');
+  assert.equal(rec.rule, 'reuse-scout-prompt'); assert.equal(rec.delivery, 'prompt');
+  assert.equal(rec.repo, 'portfolio-html');
+  assert.equal(rec.session_id, 's-rm'); assert.equal(rec.prompt_id, 'p4');
+  assert.ok(rec.pattern_index >= 0);
+  // Enough of the prompt to recognize it later, never the whole thing.
+  assert.equal(rec.prompt_excerpt.length, 160);
+  assert.ok(rec.prompt_excerpt.startsWith('버튼 컴포넌트 하나 만들어줘.'));
+  assert.equal(/\s\s|\n/.test(rec.prompt_excerpt), false);
+  assert.equal(rec.target, undefined);
+  const ledger = JSON.parse(fs.readFileSync(path.join(root, 'state', 's-rm.json'), 'utf8'));
+  assert.equal(ledger.reminded['reuse-scout-prompt'].prompt_id, rec.prompt_id);
+});
+
+test('no remind record when nothing fires, and a typed /skill writes only its invoke line', () => {
+  const quiet = testEnv();
+  runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-rm2', prompt: 'why is this test flaky?' }), quiet.env);
+  assert.deepEqual(recsOf(quiet.root, 'reuse-scout'), []);
+  const typed = testEnv();
+  runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-rm3', prompt_id: 'p5', prompt: '/verify 버튼 컴포넌트 하나 만들어줘' }), typed.env);
+  assert.deepEqual(recsOf(typed.root, 'verify').map((x) => x.type), ['invoke']);
+  assert.deepEqual(recsOf(typed.root, 'reuse-scout'), []);
 });

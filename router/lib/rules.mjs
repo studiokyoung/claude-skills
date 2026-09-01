@@ -37,9 +37,14 @@ export function rulesFor(loaded, event, repo) {
   return loaded.rules.filter((r) => r.event === event && inScope(r, repo, loaded.repoGroups));
 }
 
-export function matchPrompt(rule, text) {
+// A record wants to know WHICH pattern fired, so the index is the primitive and the boolean is its view.
+export function matchPromptIndex(rule, text) {
   const t = String(text || '').slice(0, 4000);
-  return rule._patterns.some((re) => re.test(t));
+  return rule._patterns.findIndex((re) => re.test(t));
+}
+
+export function matchPrompt(rule, text) {
+  return matchPromptIndex(rule, text) >= 0;
 }
 
 export function matchPath(rule, relPath) {

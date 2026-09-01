@@ -17,6 +17,19 @@ export function localIso(d = new Date()) {
   return `${local}${sign}${pad(offMin / 60)}:${pad(offMin % 60)}`;
 }
 
+// What a record keeps of the text that triggered it: whitespace collapsed and cut to `max`, so one
+// line stays readable and the whole prompt never lands in the buffer.
+export function excerpt(text, max) {
+  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+// Seconds since an ISO timestamp, never negative (a clock that moved is not a negative age), and
+// null when there is no timestamp or it does not parse.
+export function ageSeconds(ts, now = Date.now()) {
+  const t = ts ? Date.parse(ts) : NaN;
+  return Number.isNaN(t) ? null : Math.max(0, Math.round((now - t) / 1000));
+}
+
 // The buffer file for one skill: sanitized, and never an empty name (`unknown.jsonl`, the same
 // fallback the session ledger uses), so a nameless record still lands somewhere readable.
 export function recordPath(skill) {

@@ -53,20 +53,22 @@ export function decideCommit(loaded, input, parsed) {
   // pathspecs, the marker and the fingerprint all belong to.
   const repo = repoOf(top);
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
-  if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
-  if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo };
+  // skill/cand/markerTs are what a gate record joins on; none of them steers a decision.
+  if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo, skill: null, cand: null, markerTs: null };
+  if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo, skill: rule.skill, cand: null, markerTs: null };
   // null = a git listing failed. "Could not tell" is not "nothing to commit": skip both shortcuts
   // and let the marker decide.
   const cand = candidateSet(top, { ...c, base: eb }, adds, cwd);
   if (cand) {
-    if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo };
-    if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo };
+    if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo, skill: rule.skill, cand, markerTs: null };
+    if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo, skill: rule.skill, cand, markerTs: null };
   }
   const marker = readMarker(top);
   const fp = fingerprint(top);
-  if (marker && fp && marker.fingerprint === fp) return { decision: 'allow', why: `verified ${marker.ts}`, ruleId: rule.id, repo };
+  const markerTs = marker && marker.ts ? String(marker.ts) : null;
+  if (marker && fp && marker.fingerprint === fp) return { decision: 'allow', why: `verified ${marker.ts}`, ruleId: rule.id, repo, skill: rule.skill, cand, markerTs };
   const why = !fp ? 'fingerprint unavailable (git failed)' : marker ? `tree changed since ${marker.ts}` : 'marker missing';
-  return { decision: 'deny', why, ruleId: rule.id, repo, message: denyMessage(rule, why) };
+  return { decision: 'deny', why, ruleId: rule.id, repo, message: denyMessage(rule, why), skill: rule.skill, cand, markerTs };
 }
 
 export function decideBackstop(loaded, ledger, input, targets) {

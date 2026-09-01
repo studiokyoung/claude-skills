@@ -3,7 +3,7 @@
 import { failOpen, readStdin, emit, log } from './lib/io.mjs';
 import { loadRules, repoOf, knownSkills } from './lib/rules.mjs';
 import { loadLedger, saveLedger } from './lib/ledger.mjs';
-import { appendRecord } from './lib/records.mjs';
+import { appendRecord, excerpt } from './lib/records.mjs';
 import { detectUserSkill, planReminders } from './lib/prompt.mjs';
 
 failOpen(async () => {
@@ -38,6 +38,12 @@ failOpen(async () => {
   for (const f of fired) ledger.reminded[f.ruleId] = { skill: f.skill, prompt_id: prompt_id || null, ts: now };
   saveLedger(ledger);
   for (const f of fired) log('prompt', f.ruleId, repo, 'remind');
+  // Logged first, emitted last: a failing record buffer costs a line in the log, never the reminder.
+  for (const f of fired) {
+    try {
+      appendRecord(f.skill, { type: 'remind', rule: f.ruleId, delivery: 'prompt', repo, session_id, prompt_id: prompt_id || null, pattern_index: f.patternIndex, prompt_excerpt: excerpt(prompt, 160) });
+    } catch (e) { log('records', f.ruleId, repo, 'record-failed', e && e.message); }
+  }
   if (messages.length) {
     emit({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: messages.join('\n') } });
   }

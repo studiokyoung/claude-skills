@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { loadRules, repoOf, inScope, rulesFor, matchPrompt, matchPath, knownSkills } from '../lib/rules.mjs';
+import { loadRules, repoOf, inScope, rulesFor, matchPrompt, matchPromptIndex, matchPath, knownSkills } from '../lib/rules.mjs';
 import { makeRepo, tmpDir } from './helpers.mjs';
 
 delete process.env.ROUTER_RULES;
@@ -101,4 +101,12 @@ test('docs_only matches by extension, never by directory name', () => {
   assert.equal(loaded.docsOnly.test('docs/x.tsx'), false);
   assert.equal(loaded.docsOnly.test('web/app/docs/page.tsx'), false);
   assert.equal(loaded.docsOnly.test('raw/session/run.mjs'), false);
+});
+
+test('matchPromptIndex names which pattern fired, -1 when none does', () => {
+  const r = loaded.rules.find((x) => x.id === 'reuse-scout-prompt');
+  assert.equal(matchPromptIndex(r, 'add a useDebounce hook'), 0);
+  assert.equal(matchPromptIndex(r, '버튼 컴포넌트 하나 만들어줘'), 1);
+  assert.equal(matchPromptIndex(r, 'why is this test flaky?'), -1);
+  assert.equal(matchPrompt(r, 'add a useDebounce hook'), true);
 });
