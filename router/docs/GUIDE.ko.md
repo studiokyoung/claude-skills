@@ -110,6 +110,10 @@ code: the repo probably already has part of this.
 - **자기-에코 가드.** 프롬프트에 `[skill-router]`가 들어 있으면 룰을 아예
   평가하지 않는다. 리마인드 문구가 다시 패턴에 걸려 세션의 1회분을 태우는
   걸 막는다.
+- **하네스 턴 가드.** `<task-notification>`이나 `<system-reminder>`로
+  시작하는 프롬프트, 앞 200자에 `[SYSTEM NOTIFICATION - NOT USER INPUT]`가
+  든 프롬프트도 평가하지 않는다. 백그라운드 작업이 뱉은 문장이 세션의
+  1회분을 태우거나, 아무도 타이핑하지 않은 invoke를 남기는 걸 막는다.
 
 ### 2.3 런 기록
 

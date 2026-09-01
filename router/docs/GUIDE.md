@@ -120,6 +120,11 @@ code: the repo probably already has part of this.
 - **Self-echo guard.** A prompt containing `[skill-router]` is not evaluated
   at all, so the reminder's own words cannot re-trigger the rule that wrote
   them and burn the session's single reminder.
+- **Harness-turn guard.** A prompt that starts as a `<task-notification>` or
+  a `<system-reminder>`, or that carries `[SYSTEM NOTIFICATION - NOT USER
+  INPUT]` in its first 200 characters, is not evaluated either, so a
+  background task's own words cannot burn that reminder or bank an invoke
+  nobody typed.
 
 ### 2.3 Run records
 

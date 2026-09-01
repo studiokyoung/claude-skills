@@ -59,6 +59,11 @@ Requirements: Node 22+, git. No npm packages. The installer registers four hooks
 The last one is the [self-check](#self-check-sessionstart), and its budget is
 longer because it spawns the other three before it answers.
 
+The prompt hook sees harness turns too, and ignores them: a prompt that starts
+as a background task notification or a system reminder, or that carries the
+harness's not-user-input marker, is dropped before any rule or slash command is
+read, so text nobody typed cannot spend the session's one reminder.
+
 It also adds one `permissions.allow` entry per name in `allow_skills`
 (`Skill(verify)`, `Skill(reuse-scout)`, `Skill(skill-router)`,
 `Skill(skill-review)`: a skill with `allowed-tools` otherwise stops at a

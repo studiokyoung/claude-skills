@@ -154,3 +154,30 @@ test('no remind record when nothing fires, and a typed /skill writes only its in
   assert.deepEqual(recsOf(typed.root, 'verify').map((x) => x.type), ['invoke']);
   assert.deepEqual(recsOf(typed.root, 'reuse-scout'), []);
 });
+
+test('a harness turn is ignored even when its body matches a prompt rule', () => {
+  const { root, env } = testEnv();
+  const body = '<task-notification>A background task finished. Its request was: add a modal component to the settings page.</task-notification>';
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-hn', prompt_id: 'p6', prompt: body }), env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  assert.deepEqual(recsOf(root, 'reuse-scout'), []);
+  assert.equal(fs.existsSync(path.join(root, 'state', 's-hn.json')), false);
+});
+
+test('the same sentence typed by the user still reminds', () => {
+  const { root, env } = testEnv();
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-hn2', prompt_id: 'p6', prompt: 'add a modal component to the settings page.' }), env);
+  assert.match(r.json.hookSpecificOutput.additionalContext, /reuse-scout/);
+  assert.deepEqual(recsOf(root, 'reuse-scout').map((x) => x.type), ['remind']);
+});
+
+test('a typed skill inside a harness turn is not banked as a user invoke', () => {
+  const { root, env } = testEnv();
+  const body = '/verify the changes\n\n[SYSTEM NOTIFICATION - NOT USER INPUT] delivered by the harness, not typed by anyone.';
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-hn3', prompt_id: 'p7', prompt: body }), env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  assert.deepEqual(recsOf(root, 'verify'), []);
+  assert.equal(fs.existsSync(path.join(root, 'state', 's-hn3.json')), false);
+});

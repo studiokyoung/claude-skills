@@ -12,6 +12,11 @@ failOpen(async () => {
   const { session_id, prompt_id, cwd, prompt } = input;
   // Neither text to match nor a session to key a ledger by: not a prompt this hook can act on.
   if (prompt === undefined && session_id === undefined) return;
+  // Claude Code delivers harness-generated turns through this hook too (background task
+  // notifications, system reminders). Nobody typed them, so evaluating one would spend the
+  // session's single reminder, or bank an invoke, on text the user never wrote.
+  const head = String(prompt || '').trim();
+  if (/^<(?:task-notification|system-reminder)/.test(head) || head.slice(0, 200).includes('[SYSTEM NOTIFICATION - NOT USER INPUT]')) return;
   const repo = repoOf(cwd);
   // A broken/missing rules file must stay fail-open, but not silently: leave a trace.
   let loaded;
