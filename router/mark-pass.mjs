@@ -20,9 +20,22 @@ failOpen(() => {
     const value = typeof a[k] === 'string' ? safeJson(a[k]) : null;
     return { ok: value !== null || a[k] === 'null', value };
   };
+  // …except that routes are a plain list, and /verify hands them over as one far more often than
+  // as JSON: `--routes /,/work/x` is accepted and split. A value that meant to be JSON (it opens
+  // with a bracket) and does not parse is still an error, and so is an empty result — recording
+  // `["[oops"]` as a checked route would be a lie in the record of what /verify ran. --gates is a
+  // map, not a list, so no such leniency there.
+  const routeList = () => {
+    if (a.routes === undefined) return { ok: true, value: null };
+    const strict = json('routes');
+    if (strict.ok) return strict;
+    if (typeof a.routes !== 'string' || /^\s*[[{]/.test(a.routes)) return { ok: false, value: null };
+    const list = a.routes.split(',').map((s) => s.trim()).filter(Boolean);
+    return { ok: list.length > 0, value: list };
+  };
   const gates = json('gates');
   if (!gates.ok) { emit({ ok: false, reason: 'bad-gates-json' }); return; }
-  const routes = json('routes');
+  const routes = routeList();
   if (!routes.ok) { emit({ ok: false, reason: 'bad-routes-json' }); return; }
   const fp = fingerprint(root);
   if (!fp) { emit({ ok: false, reason: 'fingerprint-failed' }); return; }

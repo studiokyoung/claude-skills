@@ -254,3 +254,19 @@ test('bashWriteTargetsWithBase: each target carries the cd it was written under'
   assert.deepEqual(bashWriteTargetsWithBase('echo hi > /dev/null'), []);
   assert.deepEqual(bashWriteTargets('cd /tmp/scratch && cat > web/app/x.tsx <<EOF\nx\nEOF'), ['web/app/x.tsx']);
 });
+
+test('mark-pass: --routes takes a bare comma list, --gates stays strict JSON', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'a.txt': 'a' });
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'b');
+  const one = runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', '/']);
+  assert.equal(one.json.ok, true);
+  assert.deepEqual(readMarker(dir).routes, ['/']);
+  runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', '/,/work/x']);
+  assert.deepEqual(readMarker(dir).routes, ['/', '/work/x']);
+  runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', '["/","/work/x"]']);
+  assert.deepEqual(readMarker(dir).routes, ['/', '/work/x']);
+  // Nothing usable, and anything that meant to be JSON, are still errors.
+  assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', ' , ']).json, { ok: false, reason: 'bad-routes-json' });
+  assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir, '--gates', 'git=PASS']).json, { ok: false, reason: 'bad-gates-json' });
+});

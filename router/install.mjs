@@ -12,6 +12,17 @@ import { loadRules } from './lib/rules.mjs';
 
 const argv = process.argv.slice(2);
 if (argv.some((t) => /^--settings=/.test(t))) { console.error('router: use --settings <path> (a space, not =)'); process.exit(2); }
+// A typo (`--setting`) or a stray positional must not read as "install with the defaults" and
+// rewrite the real settings file.
+const VALID = new Set(['settings', 'dry-run', 'uninstall']);
+for (let i = 0; i < argv.length; i++) {
+  const key = argv[i].startsWith('--') ? argv[i].slice(2) : null;
+  if (key === null || !VALID.has(key)) {
+    console.error('router: usage: node install.mjs [--settings <path>] [--dry-run] [--uninstall]');
+    process.exit(2);
+  }
+  if (key === 'settings') i++; // its value is the next token, not a positional
+}
 const a = parseArgs(argv);
 if (a.settings === true) { console.error('router: --settings needs a path'); process.exit(2); }
 const settingsPath = path.resolve(typeof a.settings === 'string' ? a.settings : path.join(os.homedir(), '.claude', 'settings.json'));
@@ -50,6 +61,16 @@ for (const { event, matcher, script } of ENTRIES) {
   }
   const present = list.some((entry) => (entry.hooks || []).some((h) => isOurs(h) && h.command.endsWith(`/${script}`)));
   if (present) continue;
+  // The same script registered from a checkout that has since moved: repoint it instead of adding
+  // a second entry, so the settings file cannot end up running two copies of the router.
+  const stale = new RegExp(`^node .*/router/${script.replace(/\./g, '\\.')}$`);
+  let replaced = false;
+  for (const e of list) {
+    for (const h of e.hooks || []) {
+      if (typeof h.command === 'string' && stale.test(h.command)) { h.command = `node ${R}/${script}`; replaced = true; }
+    }
+  }
+  if (replaced) { settings.hooks[event] = list; changes.push(`hooks.${event}: replaced ${script}`); continue; }
   const entry = {};
   if (matcher) entry.matcher = matcher;
   entry.hooks = [{ type: 'command', command: `node ${R}/${script}`, timeout: 5 }];

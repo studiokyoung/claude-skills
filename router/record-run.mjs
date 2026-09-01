@@ -5,9 +5,8 @@
 import path from 'node:path';
 import { failOpen, emit } from './lib/io.mjs';
 import { parseArgs, safeJson } from './lib/args.mjs';
-import { runsDir } from './lib/paths.mjs';
 import { repoOf } from './lib/rules.mjs';
-import { appendRecord, normalizeSkill, readSkillVersion, inferSession } from './lib/records.mjs';
+import { appendRecord, recordPath, normalizeSkill, readSkillVersion, inferSession } from './lib/records.mjs';
 
 failOpen(() => {
   const a = parseArgs(process.argv.slice(2));
@@ -38,9 +37,12 @@ failOpen(() => {
       session_id: session ? session.session_id : null,
       session_inferred: Boolean(session),
       outcome,
-      caught: Array.isArray(caught) ? caught : [],
+      // A skill that reports one catch as a bare string still gets a list, not a dropped record.
+      caught: Array.isArray(caught) ? caught : caught == null ? [] : [String(caught)],
     };
   }
-  const saved = appendRecord(skill, rec);
-  emit({ ok: true, id: saved.id, file: path.join(runsDir(), `${skill}.jsonl`) });
+  let saved;
+  try { saved = appendRecord(skill, rec); }
+  catch { emit({ ok: false, reason: 'write-failed' }); return; }
+  emit({ ok: true, id: saved.id, file: recordPath(skill) });
 });

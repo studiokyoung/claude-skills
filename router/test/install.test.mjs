@@ -112,3 +112,29 @@ test('--settings=<path> is rejected instead of silently targeting the real file'
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--settings <path>/);
 });
+
+test('unknown options and positional tokens are refused before anything is written', () => {
+  const { env } = testEnv();
+  const { file } = seed();
+  const typo = run(['--setting', file, '--uninstall'], env);
+  assert.equal(typo.status, 2);
+  assert.match(typo.stderr, /usage: node install\.mjs \[--settings <path>\] \[--dry-run\] \[--uninstall\]/);
+  const positional = run([file, '--dry-run'], env);
+  assert.equal(positional.status, 2);
+  assert.match(positional.stderr, /usage: node install\.mjs/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.UserPromptSubmit, undefined);
+});
+
+test('install replaces a stale entry from a moved checkout instead of duplicating it', () => {
+  const { env } = testEnv();
+  const { file } = seed();
+  const s0 = JSON.parse(fs.readFileSync(file, 'utf8'));
+  s0.hooks.UserPromptSubmit = [{ hooks: [{ type: 'command', command: 'node /old/path/router/on-prompt.mjs', timeout: 5 }] }];
+  fs.writeFileSync(file, JSON.stringify(s0, null, 2) + '\n');
+  const r = run(['--settings', file], env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /replaced on-prompt\.mjs/);
+  const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(s.hooks.UserPromptSubmit.length, 1);
+  assert.deepEqual(s.hooks.UserPromptSubmit[0].hooks.map((h) => h.command), [`node ${routerDir}/on-prompt.mjs`]);
+});

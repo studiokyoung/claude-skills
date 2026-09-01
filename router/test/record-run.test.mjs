@@ -73,3 +73,18 @@ test('shims: the skill-local entry points run the router CLIs', () => {
   assert.equal(runsOf(root, 'verify').length, 1);
   assert.equal(runsOf(root, 'reuse-scout').length, 1);
 });
+
+test('record-run: a write failure is reported, a non-array caught is wrapped, the name is sanitized', () => {
+  const { root, env } = testEnv();
+  const { dir } = makeRepo('portfolio-html');
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, 'runs'), 'not a directory');
+  const bad = runHook('record-run.mjs', null, env, ['--skill', 'verify', '--cwd', dir, '--json', '{"verdict":"safe"}']);
+  assert.equal(bad.status, 0);
+  assert.deepEqual(bad.json, { ok: false, reason: 'write-failed' });
+  const second = testEnv();
+  const ok = runHook('record-run.mjs', null, second.env, ['--skill', 'kyoung:verify', '--cwd', dir, '--json', '{"verdict":"safe","caught":"tests: one failed"}']);
+  assert.equal(ok.json.ok, true);
+  assert.equal(ok.json.file, path.join(second.root, 'runs', 'verify.jsonl'));
+  assert.deepEqual(runsOf(second.root, 'verify')[0].caught, ['tests: one failed']);
+});

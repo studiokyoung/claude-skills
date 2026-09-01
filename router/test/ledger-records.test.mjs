@@ -82,12 +82,14 @@ test('appendRecord: defaults are authoritative and skill cannot be overridden; f
     import { appendRecord } from './lib/records.mjs';
     const a = appendRecord('verify', { type: 'run', id: undefined, ts: null, skill: 'reuse-scout', extra: 1 });
     appendRecord('../escaped', { type: 'run' });
+    appendRecord('', { type: 'run' });
     console.log(JSON.stringify(a));
   `, env);
   const a = JSON.parse(r.stdout);
   assert.equal(a.skill, 'verify'); assert.equal(a.type, 'run'); assert.equal(a.extra, 1);
   assert.match(a.id, /^verify-/); assert.match(a.ts, /[+-]\d{2}:\d{2}$/);
   assert.equal(fs.existsSync(path.join(root, 'runs', '.._escaped.jsonl')), true);
+  assert.equal(fs.existsSync(path.join(root, 'runs', 'unknown.jsonl')), true);
   assert.equal(fs.existsSync(path.join(root, 'escaped.jsonl')), false);
 });
 

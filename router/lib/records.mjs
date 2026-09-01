@@ -17,11 +17,17 @@ export function localIso(d = new Date()) {
   return `${local}${sign}${pad(offMin / 60)}:${pad(offMin % 60)}`;
 }
 
+// The buffer file for one skill: sanitized, and never an empty name (`unknown.jsonl`, the same
+// fallback the session ledger uses), so a nameless record still lands somewhere readable.
+export function recordPath(skill) {
+  const safe = String(skill || '').replace(/[^A-Za-z0-9_.-]/g, '_') || 'unknown';
+  return path.join(runsDir(), `${safe}.jsonl`);
+}
+
 export function appendRecord(skill, rec) {
-  const dir = runsDir();
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(runsDir(), { recursive: true });
   const full = { ...rec, type: rec.type || 'run', id: rec.id || newId(skill), ts: rec.ts || localIso(), skill };
-  fs.appendFileSync(path.join(dir, `${String(skill).replace(/[^A-Za-z0-9_.-]/g, '_')}.jsonl`), JSON.stringify(full) + '\n');
+  fs.appendFileSync(recordPath(skill), JSON.stringify(full) + '\n');
   return full;
 }
 
