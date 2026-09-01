@@ -33,11 +33,15 @@ if (a.since !== undefined) {
 }
 
 const until = Date.now();
+// A watermark or a --since ahead of the clock is a mistake, not a negative week: the window is empty
+// and says so, rather than reporting "-3.2 days" over records it could not have.
+const future = sinceMs > until;
 const window = {
   since: new Date(sinceMs).toISOString(),
   until: new Date(until).toISOString(),
-  days: Math.round(((until - sinceMs) / 864e5) * 10) / 10,
+  days: future ? 0 : Math.round(((until - sinceMs) / 864e5) * 10) / 10,
   source,
+  future,
 };
 // A rule table that will not load costs the pattern candidates, not the report.
 let loaded = null;

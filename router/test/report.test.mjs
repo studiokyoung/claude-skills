@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { routerDir, testEnv } from './helpers.mjs';
+import { normalizeWhy } from '../lib/report.mjs';
 
 const report = (env, args = []) => {
   const r = spawnSync('node', [path.join(routerDir, 'report.mjs'), ...args], { encoding: 'utf8', env, timeout: 20000 });
@@ -71,30 +72,45 @@ test('runs aggregate by verdict, version, gate status, numeric outcome and caugh
   assert.deepEqual(v.caught, ['typecheck: 3 errors', 'tests: flake']);
 });
 
-test('gate lines: allow/deny by why, deny to allow cycles, medians, SKIP_VERIFY overrides', () => {
+test('gate lines bucket on the reason, not on the marker timestamp riding along with it', () => {
   const { env } = testEnv();
+  // Production-shaped `why` values: the gate writes the marker's own localIso timestamp into two of
+  // them, so a bucket per raw string would be a bucket per commit.
   write(env, 'verify', [
-    // session a: deny, deny, allow (marker age 100) → one cycle, 2 denies before the first allow
+    // session a: deny, deny, allow (marker age 100) -> one cycle, 2 denies before the first allow
     { type: 'gate', ts: ago(50), session_id: 'a', decision: 'deny', why: 'marker missing', marker_age_s: null, command_excerpt: 'git commit -m a' },
     { type: 'gate', ts: ago(49), session_id: 'a', decision: 'deny', why: 'marker missing', marker_age_s: null, command_excerpt: 'git commit -m a' },
-    { type: 'gate', ts: ago(48), session_id: 'a', decision: 'allow', why: 'verified 2026-08-30', marker_age_s: 100, command_excerpt: 'git commit -m a' },
-    // session b: deny, allow (marker age 40) → one cycle, 1 deny before the first allow
-    { type: 'gate', ts: ago(40), session_id: 'b', decision: 'deny', why: 'tree changed since 2026-08-29', marker_age_s: null, command_excerpt: 'git commit -m b' },
-    { type: 'gate', ts: ago(39), session_id: 'b', decision: 'allow', why: 'verified 2026-08-30', marker_age_s: 40, command_excerpt: 'git commit -m b' },
-    // an allow with no deny behind it is not a cycle
+    { type: 'gate', ts: ago(48), session_id: 'a', decision: 'allow', why: 'verified 2026-08-30T10:00:00.123-04:00', marker_age_s: 100, command_excerpt: 'git commit -m a' },
+    // session b: deny, allow (marker age 40) -> one cycle, 1 deny before the first allow
+    { type: 'gate', ts: ago(40), session_id: 'b', decision: 'deny', why: 'tree changed since 2026-08-29T09:15:00.000-04:00', marker_age_s: null, command_excerpt: 'git commit -m b' },
+    { type: 'gate', ts: ago(39), session_id: 'b', decision: 'allow', why: 'verified 2026-08-31T11:22:33.456-04:00', marker_age_s: 40, command_excerpt: 'git commit -m b' },
+    // session c: never denied, so no cycle, and 0 denies before its first allow
     { type: 'gate', ts: ago(30), session_id: 'c', decision: 'allow', why: 'docs-only', marker_age_s: null, command_excerpt: 'git commit -m docs' },
     { type: 'gate', ts: ago(20), session_id: 'c', decision: 'allow', why: 'override SKIP_VERIFY', marker_age_s: null, command_excerpt: 'SKIP_VERIFY=1 git commit -m rush' },
+    { type: 'gate', ts: ago(10), session_id: 'd', decision: 'deny', why: 'fingerprint unavailable (git failed)', marker_age_s: null, command_excerpt: 'git commit -m x' },
   ]);
   const g = report(env, ['--json']).json.skills.verify.gate;
-  assert.equal(g.total, 7);
-  assert.deepEqual(g.deny, { 'marker missing': 2, 'tree changed since 2026-08-29': 1 });
-  assert.equal(g.allow['verified 2026-08-30'], 2);
-  assert.equal(g.allow['docs-only'], 1);
+  assert.equal(g.total, 8);
+  assert.deepEqual(g.deny, { 'marker missing': 2, 'tree changed since': 1, 'fingerprint unavailable (git failed)': 1 });
+  assert.deepEqual(g.allow, { verified: 2, 'docs-only': 1, 'override SKIP_VERIFY': 1 });
   assert.equal(g.cycles.count, 2);
   assert.equal(g.cycles.median_marker_age_s, 70);
-  assert.equal(g.cycles.median_denies_before_first_allow, 1.5);
+  // a=2, b=1, c=0 (never denied): median of [0,1,2]
+  assert.equal(g.cycles.median_denies_before_first_allow, 1);
   assert.equal(g.overrides.count, 1);
   assert.deepEqual(g.overrides.commands, ['SKIP_VERIFY=1 git commit -m rush']);
+});
+
+test('normalizeWhy strips only a trailing timestamp', () => {
+  assert.equal(normalizeWhy('verified 2026-08-30T10:00:00.123-04:00'), 'verified');
+  assert.equal(normalizeWhy('verified 2026-08-30T10:00:00Z'), 'verified');
+  assert.equal(normalizeWhy('tree changed since 2026-08-29T09:15:00.000-04:00'), 'tree changed since');
+  assert.equal(normalizeWhy('fingerprint unavailable (git failed)'), 'fingerprint unavailable (git failed)');
+  assert.equal(normalizeWhy('marker missing'), 'marker missing');
+  assert.equal(normalizeWhy('docs-only'), 'docs-only');
+  assert.equal(normalizeWhy('nothing-to-commit'), 'nothing-to-commit');
+  assert.equal(normalizeWhy('override SKIP_VERIFY'), 'override SKIP_VERIFY');
+  assert.equal(normalizeWhy(''), 'unknown');
 });
 
 test('annotations and health records are reported', () => {
@@ -224,4 +240,52 @@ test('a bad --since and an unknown flag are refused', () => {
   const unknown = report(env, ['--weekly']);
   assert.equal(unknown.status, 2);
   assert.match(unknown.stderr, /usage/);
+});
+
+test('version-regression waits for three runs before it accuses a version', () => {
+  const one = testEnv();
+  write(one.env, 'verify', [{ type: 'run', ts: ago(5), version: '3.0.0', session_id: 'a', outcome: { verdict: 'not-safe' }, caught: [] }]);
+  assert.deepEqual(report(one.env, ['--json']).json.candidates.filter((c) => c.kind === 'version-regression'), []);
+
+  const three = testEnv();
+  write(three.env, 'verify', [
+    { type: 'run', ts: ago(5), version: '3.0.0', session_id: 'a', outcome: { verdict: 'not-safe' }, caught: [] },
+    { type: 'run', ts: ago(4), version: '3.0.0', session_id: 'a', outcome: { verdict: 'not-safe' }, caught: [] },
+    { type: 'run', ts: ago(3), version: '3.0.0', session_id: 'a', outcome: { verdict: 'not-safe' }, caught: [] },
+  ]);
+  const hit = report(three.env, ['--json']).json.candidates.filter((c) => c.kind === 'version-regression');
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].subject, 'verify 3.0.0');
+  assert.match(hit[0].detail, /over 3 runs/);
+});
+
+test('pattern-unused only fires for rules whose scope the window actually entered', () => {
+  const web = testEnv();
+  write(web.env, 'reuse-scout', [
+    { type: 'remind', ts: ago(5), rule: 'reuse-scout-prompt', delivery: 'prompt', repo: 'portfolio-html', session_id: 'a', pattern_index: 0, prompt_excerpt: 'add a hook' },
+  ]);
+  const webSubjects = report(web.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
+  assert.ok(webSubjects.includes('reuse-scout-prompt #1'), webSubjects.join(','));
+  assert.ok(!webSubjects.includes('save-memory-wrapup #0'), 'a corp rule cannot be unused over a week spent in the portfolio');
+
+  const corp = testEnv();
+  write(corp.env, 'reuse-scout', [
+    { type: 'invoke', ts: ago(5), repo: 'corp-mobile', session_id: 'a', trigger: 'user' },
+  ]);
+  const corpSubjects = report(corp.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
+  assert.ok(corpSubjects.includes('save-memory-wrapup #0'), corpSubjects.join(','));
+});
+
+test('a --since ahead of the clock is an empty window, never a negative one', () => {
+  const { env } = testEnv();
+  write(env, 'verify', [{ type: 'invoke', ts: ago(5), session_id: 'a', trigger: 'user' }]);
+  const future = new Date(Date.now() + 24 * 3600e3).toISOString();
+  const md = report(env, ['--since', future]);
+  assert.equal(md.status, 0, md.stderr);
+  assert.match(md.stdout, /window is empty \(since is in the future\)/);
+  assert.doesNotMatch(md.stdout, /-\d+(\.\d+)? days/);
+  const j = report(env, ['--json', '--since', future]).json;
+  assert.equal(j.window.future, true);
+  assert.equal(j.window.days, 0);
+  assert.equal(j.totals.records, 0);
 });

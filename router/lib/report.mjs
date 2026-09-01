@@ -7,6 +7,13 @@ import { stateDir } from './paths.mjs';
 const bump = (o, k, n = 1) => { o[k] = (o[k] || 0) + n; };
 const list = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
 
+// The gate writes the marker's own timestamp into its reason (`verified 2026-09-01T00:12:03.227-04:00`,
+// `tree changed since ...`), so bucketing on the raw string is a bucket per commit and the whole
+// column reads as noise. Strip a trailing ISO timestamp and the vocabulary collapses back to the
+// handful of reasons the gate actually has; every other reason is already a constant and passes through.
+const TRAILING_TS = /\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+export const normalizeWhy = (why) => String(why ?? '').trim().replace(TRAILING_TS, '') || 'unknown';
+
 export function median(xs) {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
@@ -97,7 +104,7 @@ export function aggregate(records, window) {
     } else if (type === 'gate') {
       totals.gate++;
       s.gate.total++;
-      const why = r.why || 'unknown';
+      const why = normalizeWhy(r.why);
       bump(r.decision === 'deny' ? s.gate.deny : s.gate.allow, why);
       if (why === 'override SKIP_VERIFY') {
         s.gate.overrides.count++;
@@ -151,10 +158,12 @@ export function aggregate(records, window) {
     let seenAllow = false;
     for (const rec of lines) {
       if (rec.decision === 'deny') { pending++; continue; }
+      // Denies before the FIRST allow of the session, which is 0 when the session was never denied:
+      // leaving those sessions out would measure the cost of a deny rather than the cost of the gate.
+      if (!seenAllow) acc.firstDenies.push(pending);
       if (pending > 0) {
         acc.cycles++;
         if (typeof rec.marker_age_s === 'number') acc.ages.push(rec.marker_age_s);
-        if (!seenAllow) acc.firstDenies.push(pending);
         pending = 0;
       }
       seenAllow = true;
@@ -173,6 +182,7 @@ export function aggregate(records, window) {
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const MIN_REMINDERS = 3;
 const MIN_DENIES = 3;
+const MIN_RUNS = 3;
 
 export function candidates(records, agg, loaded) {
   const out = [];
@@ -185,7 +195,9 @@ export function candidates(records, agg, loaded) {
     for (const [version, v] of Object.entries(s.run.versions)) {
       const bad = v.verdicts['not-safe'] || 0;
       const good = v.verdicts.safe || 0;
-      if (bad > good) out.push({ kind: 'version-regression', subject: `${skill} ${version}`, detail: `${bad} not-safe vs ${good} safe` });
+      // A minimum sample, like the other thresholds: the first not-safe run on a fresh version is a
+      // bad afternoon, not evidence that the version is worse.
+      if (v.total >= MIN_RUNS && bad > good) out.push({ kind: 'version-regression', subject: `${skill} ${version}`, detail: `${bad} not-safe vs ${good} safe over ${v.total} runs` });
     }
   }
 
@@ -216,8 +228,16 @@ export function candidates(records, agg, loaded) {
   // occur. Either way it is a rule-table edit, not a mystery.
   if (loaded) {
     const fired = new Set(records.filter((r) => r.type === 'remind' && Number.isInteger(r.pattern_index)).map((r) => `${r.rule} #${r.pattern_index}`));
+    const seen = new Set(records.map((r) => r.repo).filter(Boolean));
     for (const rule of loaded.rules) {
       if (rule.event !== 'prompt') continue;
+      // A pattern cannot be called unused over a window that never entered its scope: a corp-only
+      // rule matching nothing during a week spent in the portfolio says nothing about the pattern.
+      const scope = rule.repos ?? '*';
+      if (scope !== '*') {
+        const group = Array.isArray(scope) ? scope : (loaded.repoGroups[scope] || []);
+        if (!group.some((name) => seen.has(name))) continue;
+      }
       (rule.patterns || []).forEach((p, i) => {
         const subject = `${rule.id} #${i}`;
         if (!fired.has(subject)) out.push({ kind: 'pattern-unused', subject, detail: String(p).slice(0, 60) });
@@ -234,6 +254,10 @@ const pairs = (o) => Object.entries(o).map(([k, v]) => `${k} ${v}`).join(' · ')
 export function renderMd(agg) {
   const w = agg.window;
   const L = ['# skill router · weekly review', `window ${w.since} → ${w.until} · ${w.days} days · window from ${w.source} · ${agg.totals.records} records`, ''];
+  if (w.future) {
+    L.push('window is empty (since is in the future). Nothing to review: fix the --since argument, or the watermark a review left ahead of the clock.');
+    return L.join('\n');
+  }
   if (!agg.totals.records) {
     L.push('nothing this week: no records in this window. Either the router is quiet or it is off, and `node router/selfcheck.mjs --cli` says which.');
     return L.join('\n');
@@ -265,7 +289,7 @@ export function renderMd(agg) {
       L.push(`- gate ${s.gate.total}`);
       if (Object.keys(s.gate.allow).length) L.push(`  - allow: ${pairs(s.gate.allow)}`);
       if (Object.keys(s.gate.deny).length) L.push(`  - deny: ${pairs(s.gate.deny)}`);
-      if (s.gate.cycles.count) L.push(`  - deny to allow cycles ${s.gate.cycles.count} · median marker age at allow ${s.gate.cycles.median_marker_age_s ?? 'n/a'}s · median denies before the first allow ${s.gate.cycles.median_denies_before_first_allow ?? 'n/a'}`);
+      if (s.gate.cycles.count) L.push(`  - deny to allow cycles ${s.gate.cycles.count} · median marker age at allow ${s.gate.cycles.median_marker_age_s ?? 'n/a'}s · median denies before the first allow ${s.gate.cycles.median_denies_before_first_allow ?? 'n/a'} (a session that was never denied counts 0)`);
       if (s.gate.overrides.count) {
         L.push(`  - override SKIP_VERIFY ${s.gate.overrides.count}:`);
         for (const c of s.gate.overrides.commands) L.push(`    - ${c}`);
