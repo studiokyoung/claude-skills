@@ -16,6 +16,7 @@ test('detectUserSkill: raw slash, wrapped forms, unknown, plain text', () => {
   assert.equal(detectUserSkill('  /kyoung:reuse-scout a toast', known), 'reuse-scout');
   assert.equal(detectUserSkill('<command-name>/explain-diff</command-name><command-args>x</command-args>', known), 'explain-diff');
   assert.equal(detectUserSkill('<command-message>save-memory</command-message>', known), 'save-memory');
+  assert.equal(detectUserSkill('hello <command-name>/verify</command-name> mid-sentence', known), null);
   assert.equal(detectUserSkill('/clear', known), null);
   assert.equal(detectUserSkill('please run /verify later', known), null);
   assert.equal(detectUserSkill('', known), null);
@@ -78,4 +79,24 @@ test('malformed stdin and wrong event: exit 0, no output', () => {
   assert.equal(bad.status, 0); assert.equal(bad.stdout.trim(), '');
   const wrong = runHook('on-prompt.mjs', hookInput({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }), env);
   assert.equal(wrong.status, 0); assert.equal(wrong.stdout.trim(), '');
+});
+
+test('typed invoke skips reminder evaluation even when the body would match a rule', () => {
+  const { root, env } = testEnv();
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-g', prompt_id: 'p3', prompt: '/verify 버튼 컴포넌트 하나 만들어줘' }), env);
+  assert.equal(r.stdout.trim(), '');
+  const ledger = JSON.parse(fs.readFileSync(path.join(root, 'state', 's-g.json'), 'utf8'));
+  assert.deepEqual(Object.keys(ledger.reminded), []);
+  assert.equal(ledger.user_invoked[0].skill, 'verify');
+});
+
+test('a rule without a message never emits', () => {
+  const { root, env } = testEnv();
+  const rules = JSON.parse(fs.readFileSync(env.ROUTER_RULES, 'utf8'));
+  rules.rules.push({ id: 'no-message', skill: 'verify', event: 'prompt', repos: '*', mode: 'remind', patterns: ['zzqq-no-message-zzqq'] });
+  const file = path.join(root, 'rules.json');
+  fs.writeFileSync(file, JSON.stringify(rules));
+  const r = runHook('on-prompt.mjs', prompt({ cwd: web.dir, session_id: 's-h', prompt: 'zzqq-no-message-zzqq please' }), { ...env, ROUTER_RULES: file });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
 });
