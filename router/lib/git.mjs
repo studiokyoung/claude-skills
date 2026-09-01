@@ -82,6 +82,15 @@ export function trackedModifiedPaths(cwd) {
   return out == null ? null : out.split('\0').filter(Boolean);
 }
 
+// The working context a run record keeps: the commit and branch it ran against, and how many paths
+// were dirty. Null wherever git could not answer, so "outside a repo" never reads as "clean tree".
+export function gitContext(cwd) {
+  const h = head(cwd);
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const entries = statusEntries(cwd);
+  return { head: h ? h.slice(0, 12) : null, branch: branch ? branch.trim() : null, changed: entries ? entries.length : null };
+}
+
 // Files hashed by size+mtime instead of content: anything not in HEAD (untracked `?`, added `A`),
 // and anything past this size. A new file's content is new by definition, so the cheap stamp is
 // enough to move the hash — and reading it is what costs: 456 MB of untracked PNGs in a real

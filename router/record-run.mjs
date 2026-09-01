@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // ~/claude-skills/router/record-run.mjs — skills call this as their last step.
-//   node record-run.mjs --skill verify --cwd <repo> --json '{"verdict":"safe",...,"caught":[...]}'
+//   node record-run.mjs --skill verify --cwd <repo> [--prompt-id <id>] --json '{"verdict":"safe",...,"caught":[...]}'
 //   node record-run.mjs --skill verify --type annotation --json '{"ref":"<run id>","missed":"...","by":"debrief 2026-09-02"}'
 import path from 'node:path';
 import { failOpen, emit } from './lib/io.mjs';
 import { parseArgs, safeJson } from './lib/args.mjs';
 import { repoOf } from './lib/rules.mjs';
+import { gitContext } from './lib/git.mjs';
 import { appendRecord, recordPath, normalizeSkill, readSkillVersion, inferSession } from './lib/records.mjs';
 
 failOpen(() => {
@@ -36,6 +37,9 @@ failOpen(() => {
       cwd,
       session_id: session ? session.session_id : null,
       session_inferred: Boolean(session),
+      // Passed by a skill that knows which prompt it is answering; null until one does.
+      prompt_id: typeof a['prompt-id'] === 'string' ? a['prompt-id'] : null,
+      git: gitContext(cwd),
       outcome,
       // A skill that reports one catch as a bare string still gets a list, not a dropped record.
       caught: Array.isArray(caught) ? caught : caught == null ? [] : [String(caught)],

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { runHook, testEnv, makeRepo, routerDir } from './helpers.mjs';
+import { runHook, testEnv, makeRepo, routerDir, tmpDir } from './helpers.mjs';
 import { readMarker } from '../lib/git.mjs';
 
 const runsOf = (root, skill) => fs.readFileSync(path.join(root, 'runs', `${skill}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -87,4 +87,24 @@ test('record-run: a write failure is reported, a non-array caught is wrapped, th
   assert.equal(ok.json.ok, true);
   assert.equal(ok.json.file, path.join(second.root, 'runs', 'verify.jsonl'));
   assert.deepEqual(runsOf(second.root, 'verify')[0].caught, ['tests: one failed']);
+});
+
+test('run record carries the git context of --cwd and an optional prompt id; nulls outside a repo', () => {
+  const { root, env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'x' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'y');
+  const r = runHook('record-run.mjs', null, env, ['--skill', 'verify', '--cwd', dir, '--prompt-id', 'p42', '--json', '{"verdict":"safe"}']);
+  assert.equal(r.json.ok, true);
+  const [rec] = runsOf(root, 'verify');
+  const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  assert.equal(rec.git.head, g('rev-parse', 'HEAD').slice(0, 12));
+  assert.equal(rec.git.branch, g('rev-parse', '--abbrev-ref', 'HEAD'));
+  assert.equal(rec.git.changed, 1);
+  assert.equal(rec.prompt_id, 'p42');
+  const outside = testEnv();
+  runHook('record-run.mjs', null, outside.env, ['--skill', 'verify', '--cwd', tmpDir('nogit-'), '--json', '{"verdict":"safe"}']);
+  const [bare] = runsOf(outside.root, 'verify');
+  assert.deepEqual(bare.git, { head: null, branch: null, changed: null });
+  assert.equal(bare.prompt_id, null);
+  assert.equal(bare.repo, null);
 });
