@@ -20,8 +20,8 @@ export function localIso(d = new Date()) {
 export function appendRecord(skill, rec) {
   const dir = runsDir();
   fs.mkdirSync(dir, { recursive: true });
-  const full = { type: rec.type || 'run', id: rec.id || newId(skill), ts: rec.ts || localIso(), skill, ...rec };
-  fs.appendFileSync(path.join(dir, `${skill}.jsonl`), JSON.stringify(full) + '\n');
+  const full = { ...rec, type: rec.type || 'run', id: rec.id || newId(skill), ts: rec.ts || localIso(), skill };
+  fs.appendFileSync(path.join(dir, `${String(skill).replace(/[^A-Za-z0-9_.-]/g, '_')}.jsonl`), JSON.stringify(full) + '\n');
   return full;
 }
 
@@ -52,6 +52,7 @@ export function readSkillVersion(skill, skillMdPath) {
 }
 
 export function inferSession(repo, maxAgeMs = 3 * 3600e3) {
+  if (!repo) return null;
   try {
     const dir = stateDir();
     let best = null;

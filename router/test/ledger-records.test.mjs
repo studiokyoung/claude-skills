@@ -75,3 +75,41 @@ test('records: normalizeSkill / skillFromToolInput / readSkillVersion / inferSes
   assert.deepEqual(v[8], { session_id: 'sX', inferred: true });
   assert.equal(v[9], null);
 });
+
+test('appendRecord: defaults are authoritative and skill cannot be overridden; filename is sanitized', () => {
+  const { root, env } = testEnv();
+  const r = node(`
+    import { appendRecord } from './lib/records.mjs';
+    const a = appendRecord('verify', { type: 'run', id: undefined, ts: null, skill: 'reuse-scout', extra: 1 });
+    appendRecord('../escaped', { type: 'run' });
+    console.log(JSON.stringify(a));
+  `, env);
+  const a = JSON.parse(r.stdout);
+  assert.equal(a.skill, 'verify'); assert.equal(a.type, 'run'); assert.equal(a.extra, 1);
+  assert.match(a.id, /^verify-/); assert.match(a.ts, /[+-]\d{2}:\d{2}$/);
+  assert.equal(fs.existsSync(path.join(root, 'runs', '.._escaped.jsonl')), true);
+  assert.equal(fs.existsSync(path.join(root, 'escaped.jsonl')), false);
+});
+
+test('ledger: concurrent saves merge instead of clobbering; corrupt shapes are repaired', () => {
+  const { root, env } = testEnv();
+  const r = node(`
+    import { loadLedger, saveLedger, hasRun, wasReminded } from './lib/ledger.mjs';
+    saveLedger(loadLedger('c1'));
+    const a = loadLedger('c1'); const b = loadLedger('c1');
+    a.skills_ran.push({ skill: 'verify', prompt_id: 'p1', ts: 't1', trigger: 'model' }); saveLedger(a);
+    b.reminded['reuse-scout-prompt'] = { skill: 'reuse-scout', prompt_id: 'p1', ts: 't2' }; b.repo = 'portfolio-html'; saveLedger(b);
+    const m = loadLedger('c1');
+    console.log(JSON.stringify([hasRun(m, 'verify'), wasReminded(m, 'reuse-scout'), m.repo, m.skills_ran.length]));
+  `, env);
+  assert.deepEqual(JSON.parse(r.stdout), [true, true, 'portfolio-html', 1]);
+  fs.writeFileSync(path.join(root, 'state', 'bad.json'), JSON.stringify({ skills_ran: {}, reminded: [], user_invoked: 'x' }));
+  const s = node(`import { loadLedger, hasRun } from './lib/ledger.mjs'; const l = loadLedger('bad'); console.log(JSON.stringify([l.session_id, Array.isArray(l.skills_ran), Array.isArray(l.user_invoked), typeof l.reminded, hasRun(l, 'verify')]));`, env);
+  assert.deepEqual(JSON.parse(s.stdout), ['bad', true, true, 'object', false]);
+});
+
+test('inferSession(null) never matches', () => {
+  const { env } = testEnv();
+  const r = node(`import { loadLedger, saveLedger } from './lib/ledger.mjs'; import { inferSession } from './lib/records.mjs'; saveLedger(loadLedger('fresh')); console.log(JSON.stringify([inferSession(null), inferSession(undefined)]));`, env);
+  assert.deepEqual(JSON.parse(r.stdout), [null, null]);
+});
