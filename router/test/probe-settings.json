@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node /Users/kyounghoonkim/claude-skills/router/probe.mjs prompt", "timeout": 5 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": ".*", "hooks": [ { "type": "command", "command": "node /Users/kyounghoonkim/claude-skills/router/probe.mjs ctx-pre", "timeout": 5 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": ".*", "hooks": [ { "type": "command", "command": "node /Users/kyounghoonkim/claude-skills/router/probe.mjs post", "timeout": 5 } ] }
+    ]
+  }
+}
