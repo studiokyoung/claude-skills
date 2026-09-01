@@ -110,6 +110,27 @@ test('ledger: concurrent saves merge instead of clobbering; corrupt shapes are r
   assert.deepEqual(JSON.parse(s.stdout), ['bad', true, true, 'object', false]);
 });
 
+test('records: excerpt collapses whitespace and cuts by code point, never mid-character', () => {
+  const { env } = testEnv();
+  const r = node(`
+    import { excerpt } from './lib/records.mjs';
+    console.log(JSON.stringify([
+      excerpt('  a \\n\\n  b  ', 100),
+      excerpt('a'.repeat(160) + '🚀' + 'b'.repeat(10), 161),
+      excerpt(null, 10),
+    ]));
+  `, env);
+  const [collapsed, cut, nothing] = JSON.parse(r.stdout);
+  assert.equal(collapsed, 'a b');
+  // The 161st code point is the whole rocket. A code-unit slice would have stopped on its high
+  // surrogate and left half a character in the buffer.
+  assert.equal([...cut].length, 161);
+  assert.equal(cut.length, 162);
+  assert.equal(cut.endsWith('🚀'), true);
+  assert.equal(cut.isWellFormed(), true);
+  assert.equal(nothing, '');
+});
+
 test('inferSession(null) never matches', () => {
   const { env } = testEnv();
   const r = node(`import { loadLedger, saveLedger } from './lib/ledger.mjs'; import { inferSession } from './lib/records.mjs'; saveLedger(loadLedger('fresh')); console.log(JSON.stringify([inferSession(null), inferSession(undefined)]));`, env);

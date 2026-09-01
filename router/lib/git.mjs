@@ -85,10 +85,12 @@ export function trackedModifiedPaths(cwd) {
 // The working context a run record keeps: the commit and branch it ran against, and how many paths
 // were dirty. Null wherever git could not answer, so "outside a repo" never reads as "clean tree".
 export function gitContext(cwd) {
+  // head() answers the sentinel 'EMPTY' for an unborn HEAD, which a record must not carry as if it
+  // were a commit: nothing is committed yet, so the field is null while the branch still names itself.
   const h = head(cwd);
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const entries = statusEntries(cwd);
-  return { head: h ? h.slice(0, 12) : null, branch: branch ? branch.trim() : null, changed: entries ? entries.length : null };
+  return { head: h && h !== 'EMPTY' ? h.slice(0, 12) : null, branch: branch ? branch.trim() : null, changed: entries ? entries.length : null };
 }
 
 // Files hashed by size+mtime instead of content: anything not in HEAD (untracked `?`, added `A`),

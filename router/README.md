@@ -236,8 +236,11 @@ the order a session produces them:
   last two are written by the `Skill` hook, for tracked skills only.
 - `gate` is one line per `git commit` decision a `pre-commit` rule was in scope for,
   written into that rule's skill buffer. Out of scope means no gate stood there, so
-  nothing is written. `candidates` is how many paths the commit would have carried
-  (null when git could not list them), `docs_only` says the docs shortcut is what
+  nothing is written; a rule that is in scope but names no `skill` has no buffer to
+  write to, and that gap is logged as `record-skipped` instead of being dropped.
+  `candidates` is how many paths the commit would have carried, counted on the
+  `SKIP_VERIFY` path too so an override stays comparable with the denies around it, and
+  null only when git could not list them. `docs_only` says the docs shortcut is what
   allowed it, `marker_ts` and `marker_age_s` say which passing `/verify` was accepted
   and how old it was, and `command_excerpt` keeps the first 120 characters of the
   command.

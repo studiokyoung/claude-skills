@@ -18,9 +18,11 @@ export function localIso(d = new Date()) {
 }
 
 // What a record keeps of the text that triggered it: whitespace collapsed and cut to `max`, so one
-// line stays readable and the whole prompt never lands in the buffer.
+// line stays readable and the whole prompt never lands in the buffer. The cut counts code points,
+// not UTF-16 units: a slice through an astral character (an emoji, a rarer CJK glyph) would leave a
+// lone surrogate in the buffer, which is neither the character nor valid text.
 export function excerpt(text, max) {
-  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  return [...String(text ?? '').replace(/\s+/g, ' ').trim()].slice(0, max).join('');
 }
 
 // Seconds since an ISO timestamp, never negative (a clock that moved is not a negative age), and

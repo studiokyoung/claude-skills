@@ -55,10 +55,11 @@ export function decideCommit(loaded, input, parsed) {
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   // skill/cand/markerTs are what a gate record joins on; none of them steers a decision.
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo, skill: null, cand: null, markerTs: null };
-  if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo, skill: rule.skill, cand: null, markerTs: null };
   // null = a git listing failed. "Could not tell" is not "nothing to commit": skip both shortcuts
-  // and let the marker decide.
+  // and let the marker decide. Listed before the override returns, so an overridden commit records
+  // how many paths it carried instead of an ambiguous null.
   const cand = candidateSet(top, { ...c, base: eb }, adds, cwd);
+  if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo, skill: rule.skill, cand, markerTs: null };
   if (cand) {
     if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo, skill: rule.skill, cand, markerTs: null };
     if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo, skill: rule.skill, cand, markerTs: null };

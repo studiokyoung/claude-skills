@@ -27,6 +27,8 @@ failOpen(async () => {
       log('commit', d.ruleId, d.repo, d.decision, d.why);
       // Out of scope means no gate stood here: nothing was decided, so there is nothing to record.
       // Everything else is recorded before the deny, and a failing buffer never holds the deny back.
+      // A rule that IS in scope but names no skill has no buffer to write to; that gap gets logged
+      // rather than dropped, because the decision it describes still happened.
       if (d.skill) {
         try {
           appendRecord(d.skill, {
@@ -36,6 +38,8 @@ failOpen(async () => {
             command_excerpt: excerpt(command, 120),
           });
         } catch (e) { log('records', d.ruleId, d.repo, 'record-failed', e && e.message); }
+      } else if (d.ruleId !== '-') {
+        log('records', d.ruleId, d.repo, 'record-skipped', 'rule has no skill');
       }
       if (d.decision === 'deny') deny(d.message);
       return;

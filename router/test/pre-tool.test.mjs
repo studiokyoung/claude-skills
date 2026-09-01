@@ -314,3 +314,29 @@ test('every in-scope commit decision writes a gate record; an out-of-scope one w
   assert.equal(runHook('pre-tool.mjs', bash(other.dir, 'git commit -m "x"'), env).stdout.trim(), '');
   assert.equal(recsOf(root, 'verify').length, 3);
 });
+
+test('an overridden commit records the candidate count it carried, not an ambiguous null', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  assert.equal(runHook('pre-tool.mjs', bash(dir, 'SKIP_VERIFY=1 git commit -m "hotfix: prod is down"'), env).stdout.trim(), '');
+  const [rec] = recsOf(root, 'verify');
+  assert.equal(rec.type, 'gate'); assert.equal(rec.decision, 'allow');
+  assert.equal(rec.why, 'override SKIP_VERIFY');
+  // null is reserved for "git could not list them", so an override stays comparable with the
+  // denies around it instead of reading as an unlistable commit.
+  assert.equal(rec.candidates, 1);
+  assert.equal(rec.docs_only, false);
+  assert.equal(rec.marker_ts, null);
+});
+
+test('an in-scope gate rule with no skill still denies, and the buffer it lacks is logged', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const rules = JSON.parse(fs.readFileSync(env.ROUTER_RULES, 'utf8'));
+  delete rules.rules.find((x) => x.id === 'verify-commit-gate').skill;
+  const file = path.join(root, 'rules.json'); fs.writeFileSync(file, JSON.stringify(rules));
+  const r = runHook('pre-tool.mjs', bash(dir, 'git commit -m "feat"'), { ...env, ROUTER_RULES: file });
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(logOf(root), /\trecords\tverify-commit-gate\tportfolio-html\trecord-skipped\trule has no skill/);
+  assert.deepEqual(recsOf(root, 'verify'), []);
+});

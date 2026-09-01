@@ -107,4 +107,14 @@ test('run record carries the git context of --cwd and an optional prompt id; nul
   assert.deepEqual(bare.git, { head: null, branch: null, changed: null });
   assert.equal(bare.prompt_id, null);
   assert.equal(bare.repo, null);
+  // A repo with no commit yet: head is null, never the 'EMPTY' sentinel git.mjs uses internally,
+  // which would sit in the record where a commit id belongs. changed still counts, so an unborn
+  // repo stays distinguishable from no repo at all.
+  const unborn = testEnv();
+  const fresh = tmpDir('unborn-');
+  spawnSync('git', ['init', '-q'], { cwd: fresh });
+  fs.writeFileSync(path.join(fresh, 'a.txt'), 'x');
+  runHook('record-run.mjs', null, unborn.env, ['--skill', 'verify', '--cwd', fresh, '--json', '{"verdict":"safe"}']);
+  const [empty] = runsOf(unborn.root, 'verify');
+  assert.deepEqual(empty.git, { head: null, branch: null, changed: 1 });
 });
