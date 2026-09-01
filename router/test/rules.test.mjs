@@ -142,9 +142,9 @@ test('the probe sample rides with the rule and must still match it', () => {
 test('a local override replaces per key and per group, keeps the groups only the base has, and adds its own', () => {
   const merged = scratchRules(
     { repo_groups: { web: ['only-web'], extra: ['x'] }, track_skills: ['verify'] },
-    (base) => { base.repo_groups = { web: ['base-web'], corp: ['base-corp'] }; },
+    (base) => { base.repo_groups = { web: ['base-web'], other: ['base-other'] }; },
   );
-  assert.deepEqual(merged.repoGroups, { web: ['only-web'], corp: ['base-corp'], extra: ['x'] });
+  assert.deepEqual(merged.repoGroups, { web: ['only-web'], other: ['base-other'], extra: ['x'] });
   assert.deepEqual(merged.trackSkills, ['verify']);
   // A key the local does not name is the base's, untouched.
   assert.deepEqual(merged.allowSkills, loaded.allowSkills);

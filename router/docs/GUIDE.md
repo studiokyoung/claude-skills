@@ -114,7 +114,7 @@ code: the repo probably already has part of this.
   the reminder fires once more as context, without blocking. A target
   starting with `~` or containing `$` is unexpanded shell text and is skipped
   rather than spending the session's one reminder.
-- **save-memory** (Corp repos only). Wrap-up phrasing: "오늘은 여기까지,
+- **save-memory** (only in the repos its group lists). Wrap-up phrasing: "오늘은 여기까지,
   정리하자", "let's wrap up". Its own guard is where `마감일` lives, so "이번
   스프린트 마감일 언제야?" does not match. Once per session, and silent once
   save-memory has run.

@@ -237,7 +237,7 @@ export function candidates(records, agg, loaded) {
     const seen = new Set(records.map((r) => r.repo).filter(Boolean));
     for (const rule of loaded.rules) {
       if (rule.event !== 'prompt') continue;
-      // A pattern cannot be called unused over a window that never entered its scope: a corp-only
+      // A pattern cannot be called unused over a window that never entered its scope: a group-scoped
       // rule matching nothing during a week spent in the portfolio says nothing about the pattern.
       // Scope is resolved by rules.mjs, the same call the hooks route on, so the review can never
       // drift from the table. `inScope(rule, null, …)` is the "everywhere" question: a `*` rule is in

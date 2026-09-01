@@ -314,7 +314,7 @@ test('a local override that does not parse fails the rules check and names the f
 test('an empty merged gate group is an informational note, never a failure', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
-  writeLocal(root, { repo_groups: { web: [], corp: [] } });
+  writeLocal(root, { repo_groups: { web: [] } });
   const r = runHook('selfcheck.mjs', null, env, ['--cli']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /⚠️ probe\.pre-tool\s+no gated repos configured; commit-gate probe skipped/);
@@ -330,10 +330,10 @@ test('an empty merged gate group is an informational note, never a failure', () 
 test('the gate probe stages the repo the merged table names, and the card says the override is on', () => {
   const { root, env } = testEnv();
   writeSettings(root, settingsFor(root));
-  writeLocal(root, { repo_groups: { web: ['scratch-gate-repo'], corp: [] } });
+  writeLocal(root, { repo_groups: { web: ['scratch-gate-repo'] } });
   const r = runHook('selfcheck.mjs', null, env, ['--cli']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /probe\.pre-tool\s+new-file reminder \+ commit deny in scratch-gate-repo/);
-  assert.match(r.stdout, /rules\s+4 rules, 2 groups, additionalContext · local override \(web, corp\)/);
+  assert.match(r.stdout, /rules\s+4 rules, 2 groups, additionalContext · local override \(web\)/);
   assert.match(r.stdout, /^PASS/m);
 });

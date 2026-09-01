@@ -301,7 +301,7 @@ test('pattern-unused only fires for rules whose scope the window actually entere
   ]);
   const webSubjects = report(web.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
   assert.ok(webSubjects.includes('reuse-scout-prompt #1'), webSubjects.join(','));
-  assert.ok(!webSubjects.includes('save-memory-wrapup #0'), 'a corp rule cannot be unused over a week spent in the portfolio');
+  assert.ok(!webSubjects.includes('save-memory-wrapup #0'), 'a group-scoped rule cannot be unused over a week spent in the portfolio');
 
   const corp = testEnv();
   write(corp.env, 'reuse-scout', [

@@ -51,7 +51,7 @@
       "once_per_session": true,
       "unless_ran": "save-memory",
       "patterns": ["(마감(?!일|기한|시간)|정리하자|정리하고 끝|끝내자|마무리하자|마무리하고 끝|\\bwrap[\\s-]?up\\b|오늘 여기까지|세션 끝|커밋하고 끝)"],
-      "message": "Corp session is wrapping up and save-memory has not run. Invoke it before the session ends so this session's corrections and decisions are not lost."
+      "message": "This session is wrapping up and save-memory has not run. Invoke it before the session ends so this session's corrections and decisions are not lost."
     }
   ]
 }

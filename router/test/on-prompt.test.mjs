@@ -48,7 +48,7 @@ test('no match: exit 0, no output, ledger still records repo', () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'state', 's-b.json'), 'utf8')).repo, 'portfolio-html');
 });
 
-test('save-memory reminder only in corp repos', () => {
+test('save-memory reminder only in the repos its group lists', () => {
   const { env } = testEnv();
   const k = runHook('on-prompt.mjs', prompt({ cwd: corp.dir, session_id: 's-c', prompt: '오늘은 여기까지, 정리하자' }), env);
   assert.match(k.json.hookSpecificOutput.additionalContext, /save-memory/);
