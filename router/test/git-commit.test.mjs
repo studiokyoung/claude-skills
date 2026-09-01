@@ -270,3 +270,17 @@ test('mark-pass: --routes takes a bare comma list, --gates stays strict JSON', (
   assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', ' , ']).json, { ok: false, reason: 'bad-routes-json' });
   assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir, '--gates', 'git=PASS']).json, { ok: false, reason: 'bad-gates-json' });
 });
+
+test('parseCommand: a herestring or a quoted mention of << is not a heredoc opener', () => {
+  // A bogus opener never finds its terminator, so every following line disappears and a real
+  // commit becomes invisible: a silent allow. Guard `<<<`, quoted mentions, and shift operators.
+  assert.equal(parseCommand('jq -r . <<< "$payload"\ngit commit -am x').isCommit, true);
+  assert.equal(parseCommand('grep q <<<hello\ngit commit -am x').isCommit, true);
+  assert.equal(parseCommand('echo "use << EOF here" > n.txt\ngit commit -am x').isCommit, true);
+  assert.equal(parseCommand('echo "<< EOF"; git commit -am x').isCommit, true);
+  assert.equal(parseCommand('$(( a << 2 ))\ngit commit -am x').isCommit, true);
+  // …while a real heredoc still swallows its body, and only its body.
+  assert.equal(parseCommand('cat > n.md <<EOF\ngit commit -m "in body"\nEOF').isCommit, false);
+  assert.equal(parseCommand('cat > n.md <<EOF\nx\nEOF\ngit commit -am y').isCommit, true);
+  assert.equal(parseCommand("cat > n.md <<'EOF'\ngit commit -m x\nEOF").isCommit, false);
+});

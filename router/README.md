@@ -64,7 +64,7 @@ version.
 ```json
 {
   "repo_groups": { "web": ["portfolio-html"], "corp": ["corp-app"] },
-  "docs_only": "\\.(md|mdx|txt)$|(^|/)(docs|_meta|raw)/",
+  "docs_only": "\\.(md|mdx|txt|markdown)$",
   "pretooluse_context": "additionalContext",
   "track_skills": ["verify", "reuse-scout", "save-memory", "explain-diff"],
   "allow_skills": ["verify", "reuse-scout"],
@@ -104,9 +104,9 @@ version.
   `tree changed since <ts>`, or `fingerprint unavailable (git failed)`.
 
 The patterns are deliberately narrow, because a reminder on the wrong prompt is
-worse than no reminder. The English verbs and nouns are word-bounded, `build` is
-guarded so "the build is broken" does not match, `추가` does not match `추가로`, and
-`마감` does not match `마감일`.
+worse than no reminder. The English verbs and nouns are word-bounded, `build` and
+`rebuild` are both matched but guarded, so "the build is broken" does not match,
+`추가` does not match `추가로` or `추가적`, and `마감` does not match `마감일`.
 
 ### Adding a rule
 

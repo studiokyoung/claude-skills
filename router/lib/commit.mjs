@@ -76,19 +76,46 @@ function dropSubshellParen(text) {
   return close > open ? s.slice(0, -1) : text;
 }
 
+// Quoted runs blanked to spaces of the same length, so offsets still line up with the real line.
+// An unterminated quote is not a quoted run and is left alone (`git commit -m "$(cat <<'EOF'` has
+// to keep its opener). `\"` inside double quotes does not close them.
+function maskQuoted(line) {
+  const out = line.split('');
+  for (let i = 0; i < line.length; i++) {
+    const q = line[i];
+    if (q !== '"' && q !== "'") continue;
+    let j = i + 1;
+    while (j < line.length && line[j] !== q) j += q === '"' && line[j] === '\\' ? 2 : 1;
+    if (j >= line.length) continue; // unterminated: not a quoted run
+    for (let k = i + 1; k < j; k++) out[k] = ' ';
+    i = j;
+  }
+  return out.join('');
+}
+
 // Heredoc bodies are data, not command position: a `git commit -m "example"` line inside
 // `cat > note.md <<EOF … EOF` is documentation, and reading it as a command is a false deny. The
-// terminator is the raw line, except under `<<-`, which strips leading tabs. Quotes are KEPT here,
-// because pathspec extraction needs them; SKIP_VERIFY blanks them separately.
-const HEREDOC = /<<(-?)\s*(?:"([^"]*)"|'([^']*)'|\\?(\w+))/g;
+// terminator is the raw line, except under `<<-`, which strips leading tabs. Quotes are KEPT in
+// the output, because pathspec extraction needs them; SKIP_VERIFY blanks them separately.
+//
+// A BOGUS opener is the dangerous direction: its tag never appears, so every following line is
+// dropped and a real `git commit` becomes invisible (a silent allow). Hence three guards: the
+// `<<` may not be part of a `<<<` herestring, it is located in the quote-masked line so a
+// mention of `<< EOF` inside a string is not an opener, and the tag has to look like a word so
+// `$(( a << 2 ))` is not one either. The tag itself is read back off the REAL line, since a
+// legitimate one may be quoted (`<<'EOF'`).
+const HEREDOC = /(?<!<)<<(?!<)/g;
+const HEREDOC_TAG = /^<<(-?)\s*(?:"([^"]+)"|'([^']+)'|\\?([A-Za-z_]\w*))/;
 function stripHeredocs(cmd) {
   const lines = String(cmd || '').split('\n');
   const kept = [];
   for (let i = 0; i < lines.length; i++) {
     kept.push(lines[i]);
-    for (const m of lines[i].matchAll(HEREDOC)) {
-      const tag = m[2] ?? m[3] ?? m[4];
-      const dash = m[1] === '-';
+    for (const m of maskQuoted(lines[i]).matchAll(HEREDOC)) {
+      const t = lines[i].slice(m.index).match(HEREDOC_TAG);
+      if (!t) continue;
+      const tag = t[2] ?? t[3] ?? t[4];
+      const dash = t[1] === '-';
       let j = i + 1;
       while (j < lines.length && (dash ? lines[j].trim() : lines[j]) !== tag) j++;
       i = j; // drop the body and its terminator line; the next opener starts after it
