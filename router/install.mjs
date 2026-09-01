@@ -11,6 +11,7 @@ import { routerDir } from './lib/paths.mjs';
 import { loadRules } from './lib/rules.mjs';
 
 const a = parseArgs(process.argv.slice(2));
+if (a.settings === true) { console.error('router: --settings needs a path'); process.exit(2); }
 const settingsPath = path.resolve(typeof a.settings === 'string' ? a.settings : path.join(os.homedir(), '.claude', 'settings.json'));
 const R = routerDir();
 const ENTRIES = [
@@ -34,8 +35,14 @@ settings.hooks ||= {};
 for (const { event, matcher, script } of ENTRIES) {
   const list = settings.hooks[event] || [];
   if (uninstall) {
-    const kept = list.filter((entry) => !(entry.hooks || []).some(isOurs));
-    if (kept.length !== list.length) changes.push(`hooks.${event}: removed ${script}`);
+    const kept = [];
+    for (const entry of list) {
+      const hooks = entry.hooks || [];
+      const survivors = hooks.filter((h) => !isOurs(h));
+      for (const h of hooks) if (isOurs(h)) changes.push(`hooks.${event}: removed ${path.basename(h.command)}`);
+      if (survivors.length === hooks.length) kept.push(entry);
+      else if (survivors.length) kept.push({ ...entry, hooks: survivors });
+    }
     if (kept.length) settings.hooks[event] = kept; else delete settings.hooks[event];
     continue;
   }
@@ -59,7 +66,10 @@ for (const rule of ALLOW) {
 
 settings.env ||= {};
 for (const [k, v] of Object.entries(ENV)) {
-  if (uninstall && k in settings.env) { delete settings.env[k]; changes.push(`env: removed ${k}`); }
+  if (uninstall && k in settings.env) {
+    if (settings.env[k] === v) { delete settings.env[k]; changes.push(`env: removed ${k}`); }
+    else console.log(`router: env: kept ${k} (user value)`);
+  }
   if (!uninstall && !(k in settings.env)) { settings.env[k] = v; changes.push(`env: set ${k}=${v}`); }
 }
 if (Object.keys(settings.env).length === 0) delete settings.env;

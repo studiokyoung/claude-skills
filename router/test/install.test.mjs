@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { routerDir, tmpDir } from './helpers.mjs';
+import { routerDir, tmpDir, testEnv } from './helpers.mjs';
 
 const run = (args, env = process.env) => spawnSync('node', [path.join(routerDir, 'install.mjs'), ...args], { encoding: 'utf8', env });
 const seed = () => {
@@ -68,4 +68,39 @@ test('a missing settings file is created; an unparseable one is refused', () => 
   const r = run(['--settings', file]);
   assert.equal(r.status, 1);
   assert.equal(fs.readFileSync(file, 'utf8'), '{ not json');
+});
+
+test('uninstall keeps a foreign hook that shares an entry with ours', () => {
+  const { env } = testEnv();
+  const { file } = seed();
+  run(['--settings', file], env);
+  const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const ours = s.hooks.PreToolUse.find((e) => e.matcher === 'Bash|Write');
+  ours.hooks.push({ type: 'command', command: '/usr/local/bin/IMPORTANT-foreign.sh' });
+  fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n');
+  const u = run(['--settings', file, '--uninstall'], env);
+  assert.equal(u.status, 0);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const kept = after.hooks.PreToolUse.find((e) => e.matcher === 'Bash|Write');
+  assert.deepEqual(kept.hooks.map((h) => h.command), ['/usr/local/bin/IMPORTANT-foreign.sh']);
+  assert.equal(after.hooks.PreToolUse.length, 2);
+});
+
+test('--settings without a path refuses instead of targeting the real file', () => {
+  const r = run(['--settings', '--dry-run']);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--settings needs a path/);
+});
+
+test('uninstall keeps a user-set SKILL_RUNS_DIR', () => {
+  const { env } = testEnv();
+  const { file } = seed();
+  const s0 = JSON.parse(fs.readFileSync(file, 'utf8'));
+  s0.env = { SKILL_RUNS_DIR: '/Users/kyounghoonkim/MY-OWN-runs' };
+  fs.writeFileSync(file, JSON.stringify(s0, null, 2) + '\n');
+  run(['--settings', file], env);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).env.SKILL_RUNS_DIR, '/Users/kyounghoonkim/MY-OWN-runs');
+  const u = run(['--settings', file, '--uninstall'], env);
+  assert.match(u.stdout, /kept SKILL_RUNS_DIR/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).env.SKILL_RUNS_DIR, '/Users/kyounghoonkim/MY-OWN-runs');
 });
