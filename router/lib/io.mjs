@@ -12,7 +12,7 @@ export function failOpen(main) {
     .then(() => process.exit(0), () => process.exit(0));
 }
 
-// Resolves the parsed stdin JSON, or null (empty / invalid / no stdin within timeoutMs).
+// Resolves the parsed stdin JSON object, or null (empty / non-object / invalid / no stdin within timeoutMs).
 export function readStdin(timeoutMs = 2000) {
   return new Promise((resolve) => {
     let data = '';
@@ -21,7 +21,7 @@ export function readStdin(timeoutMs = 2000) {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      try { resolve(data.trim() ? JSON.parse(data) : null); } catch { resolve(null); }
+      try { const v = data.trim() ? JSON.parse(data) : null; resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : null); } catch { resolve(null); }
     };
     const timer = setTimeout(finish, timeoutMs);
     try {
@@ -33,9 +33,15 @@ export function readStdin(timeoutMs = 2000) {
   });
 }
 
-// One JSON line on fd 1, synchronously (pipes are async on macOS; exit() must not truncate).
+// One JSON line on fd 1, synchronously and completely (pipes are async on macOS: writeSync may
+// write short or throw EAGAIN once stdout is non-blocking; exit() must not truncate).
 export function emit(obj) {
-  fs.writeSync(1, JSON.stringify(obj) + '\n');
+  const buf = Buffer.from(JSON.stringify(obj) + '\n');
+  let off = 0;
+  while (off < buf.length) {
+    try { off += fs.writeSync(1, buf, off, buf.length - off); }
+    catch (e) { if (e.code !== 'EAGAIN') throw e; }
+  }
 }
 
 // Append one decision line: ts, event, ruleId, repo, decision, detail. Rotates at 1 MB.
@@ -45,7 +51,7 @@ export function log(event, ruleId, repo, decision, detail = '') {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'router.log');
     try { if (fs.statSync(file).size > 1024 * 1024) fs.renameSync(file, file + '.1'); } catch {}
-    const clean = String(detail).replace(/\s+/g, ' ').trim().slice(0, 300);
-    fs.appendFileSync(file, [new Date().toISOString(), event, ruleId || '-', repo || '-', decision, clean].join('\t') + '\n');
+    const col = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+    fs.appendFileSync(file, [new Date().toISOString(), col(event), col(ruleId) || '-', col(repo) || '-', col(decision), col(detail).slice(0, 300)].join('\t') + '\n');
   } catch {}
 }

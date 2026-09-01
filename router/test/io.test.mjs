@@ -63,3 +63,28 @@ test('parseArgs and safeJson', () => {
   const r = node(`import { parseArgs, safeJson } from './lib/args.mjs'; console.log(JSON.stringify([parseArgs(['--skill','verify','--clear','--json','{"a":1}']), safeJson('{"b":2}'), safeJson('nope'), safeJson(undefined)]));`, env);
   assert.deepEqual(JSON.parse(r.stdout), [{ skill: 'verify', clear: true, json: '{"a":1}' }, { b: 2 }, null, null]);
 });
+
+test('emit writes a >8 KB payload completely even after stdout was initialized', () => {
+  const { env } = testEnv();
+  const r = node(`import { emit } from './lib/io.mjs'; void process.stdout.isTTY; emit({ big: 'x'.repeat(60000) });`, env);
+  assert.equal(r.status, 0);
+  const parsed = JSON.parse(r.stdout.trim());
+  assert.equal(parsed.big.length, 60000);
+});
+
+test('readStdin returns null for non-object JSON', () => {
+  const { env } = testEnv();
+  for (const input of ['123', '"str"', '[1,2]', 'true']) {
+    const r = spawnSync('node', ['--input-type=module', '-e', `import { readStdin } from './lib/io.mjs'; console.log(JSON.stringify(await readStdin()));`], { encoding: 'utf8', env, cwd: routerDir, input });
+    assert.equal(r.stdout.trim(), 'null', input);
+  }
+});
+
+test('log sanitizes every column and tmpDir is a real path', () => {
+  const { root, env } = testEnv();
+  node(`import { log } from './lib/io.mjs'; log('prompt', 'r\\tX', 're\\tpo\\nEVIL', 'remind', 'd');`, env);
+  const line = fs.readFileSync(path.join(root, 'state', 'router.log'), 'utf8').trim();
+  assert.equal(line.split('\n').length, 1);
+  assert.equal(line.split('\t').length, 6);
+  assert.equal(root, fs.realpathSync(root));
+});

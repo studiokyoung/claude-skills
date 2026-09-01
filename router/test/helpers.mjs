@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 export const routerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export function tmpDir(prefix = 'router-test-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
 export function testEnv(overrides = {}) {
