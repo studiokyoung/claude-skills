@@ -12,6 +12,7 @@ const GIT_SUB = new RegExp(`^${PREFIX}git\\s+${GOPTS}(commit|add)\\b(.*)$`, 's')
 // SKIP_VERIFY=1 counts only as an env assignment heading a segment, never inside a commit message.
 const SKIP = new RegExp(`^${PREFIX}SKIP_VERIFY=1(?:\\s|$)`);
 const CD = /^\s*cd\s+(?:"([^"]*)"|'([^']*)'|(\S+))\s*$/;
+const SUBST = /\$\(|`/; // a command substitution's expansion is unknowable from the text
 const UNQUOTE = (s) => s.replace(/^['"]|['"]$/g, '');
 const ADD_ALL = ['-A', '--all', '.', '-u', '--update', ':/'];
 // Options whose VALUE is the next token — otherwise `-m "docs"` reads as the pathspec "docs".
@@ -39,23 +40,42 @@ function tokens(s) {
 }
 
 // Pathspec tokens: options (and the values they consume) dropped, everything after a bare `--` kept.
+// A substitution in pathspec position is never dropped — dropping it would empty the candidate set
+// and read as "nothing to commit"; it marks the entry unknown so candidateSet fails closed.
 function pathspecs(toks) {
-  const out = [];
+  const paths = [];
+  let unknown = false;
+  const take = (t) => { if (SUBST.test(t)) unknown = true; else paths.push(t); };
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t === '--') { out.push(...toks.slice(i + 1)); break; }
+    if (t === '--') { for (const r of toks.slice(i + 1)) take(r); break; }
     if (t.startsWith('--')) { if (!t.includes('=') && VALUE_LONG.has(t)) i++; continue; }
     if (t.startsWith('-')) { if (VALUE_SHORT.has(t.slice(-1))) i++; continue; }
-    if (t.startsWith('$(') || t.startsWith('"$(')) continue; // command substitution, not a path
-    out.push(t);
+    take(t);
   }
-  return out;
+  return { paths, unknown };
+}
+
+// Quoted text and heredoc bodies are data, not command position: strip them before judging
+// SKIP_VERIFY, so a commit message may mention the token without granting the override.
+function stripQuotedAndHeredocs(cmd) {
+  const lines = String(cmd || '').split('\n');
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    kept.push(lines[i]);
+    const m = lines[i].match(/<<-?\s*['"]?(\w+)['"]?/);
+    if (!m) continue;
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() !== m[1]) j++;
+    i = j; // drop the body and its terminator line
+  }
+  return kept.join('\n').replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""');
 }
 
 export function parseCommand(command) {
   const cmd = String(command || '');
   const segs = cmd.split(SEGMENT_SPLIT);
-  const skip = segs.some((s) => SKIP.test(s));
+  const skip = stripQuotedAndHeredocs(cmd).split(SEGMENT_SPLIT).some((s) => SKIP.test(s));
   const adds = [];
   let commit = null;
   let cd = null;
@@ -71,13 +91,14 @@ export function parseCommand(command) {
     const cPath = cm ? UNQUOTE(cm[1]) : null;
     const toks = tokens(rest);
     const base = cPath || cd || null;
+    const spec = pathspecs(toks);
     if (sub === 'add') {
       const all = toks.some((t) => ADD_ALL.includes(t));
-      adds.push({ all, paths: pathspecs(toks).filter((t) => t !== '.'), cPath, base });
+      adds.push({ all, paths: spec.paths.filter((t) => t !== '.'), cPath, base, unknown: spec.unknown });
     } else {
       const all = /(?:^|\s)(?:--all|-[a-zA-Z]*a[a-zA-Z]*)(?=\s|$)/.test(rest);
       const amend = /--amend\b/.test(rest);
-      commit = { all, amend, cPath, base, paths: pathspecs(toks) };
+      commit = { all, amend, cPath, base, paths: spec.paths, unknown: spec.unknown };
     }
   }
   return { isCommit: commit !== null, commit, adds, skip };
@@ -109,6 +130,7 @@ function globRe(g) {
 // (`git -C x` / a preceding `cd x`) and then the hook's cwd. Returns null when a listing failed:
 // "could not tell" must never reach the gate as "nothing to commit".
 export function candidateSet(top, commit, adds, cwd = top) {
+  if ((commit && commit.unknown) || (adds || []).some((a) => a && a.unknown)) return null;
   const staged = stagedPaths(top);
   if (staged == null) return null;
   const set = new Set(staged);
@@ -128,6 +150,8 @@ export function candidateSet(top, commit, adds, cwd = top) {
       continue;
     }
     for (const raw of e.paths || []) {
+      // An unexpanded `~`/`$VAR` base resolves literally: the phantom path over-includes, which
+      // is the safe direction — the gate then checks more, never less.
       const abs = path.resolve(cwd || top, e.base || '.', raw);
       const rel = path.relative(top, abs).replace(/\\/g, '/');
       if (rel === '..' || rel.startsWith('../')) continue; // outside the repo

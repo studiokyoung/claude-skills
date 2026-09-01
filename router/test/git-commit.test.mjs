@@ -165,3 +165,27 @@ test('mark-pass: malformed --gates/--routes are errors and write nothing', () =>
   assert.deepEqual(runHook('mark-pass.mjs', null, env, ['--root', dir, '--routes', '[oops']).json, { ok: false, reason: 'bad-routes-json' });
   assert.equal(readMarker(dir), null);
 });
+
+test('parseCommand: SKIP_VERIFY is judged outside quoted strings and heredoc bodies', () => {
+  assert.equal(parseCommand('git commit -m "wip; SKIP_VERIFY=1 git commit -m x"').skip, false);
+  assert.equal(parseCommand("git commit -m \"$(cat <<'EOF'\nSKIP_VERIFY=1 git commit -m x\nEOF\n)\"").skip, false);
+  assert.equal(parseCommand('SKIP_VERIFY=1 git commit -m "x"').skip, true);
+  assert.equal(parseCommand('cd web; SKIP_VERIFY=1 git commit -m x').skip, true);
+});
+
+test('command substitution in pathspec position makes the candidate set unknown, never empty', () => {
+  const { dir } = makeRepo('portfolio-html', { 'src/app.ts': 'a' });
+  fs.writeFileSync(path.join(dir, 'src/app.ts'), 'b');
+  const add = parseCommand('git add "$(git rev-parse --show-toplevel)/src/app.ts" && git commit -m x');
+  assert.equal(add.adds[0].unknown, true);
+  assert.equal(candidateSet(dir, add.commit, add.adds, dir), null);
+  const c = parseCommand('git commit -m x "$(echo src/app.ts)"');
+  assert.equal(c.commit.unknown, true);
+  assert.equal(candidateSet(dir, c.commit, c.adds, dir), null);
+  const bt = parseCommand('git add `ls src` && git commit -m x');
+  assert.equal(bt.adds[0].unknown, true);
+  const heredoc = parseCommand('git commit -m "$(cat <<\'EOF\'\nfeat\nEOF\n)"');
+  assert.equal(heredoc.isCommit, true);
+  assert.deepEqual(heredoc.commit.paths, []);
+  assert.ok(!heredoc.commit.unknown);
+});

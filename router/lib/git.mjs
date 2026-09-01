@@ -95,6 +95,7 @@ export function fingerprint(cwd) {
     modes.push(`${(st.mode & 0o777).toString(8)} ${e.path}`);
   }
   lines.sort();
+  modes.sort();
   let hashes = '';
   if (existing.length) {
     const raw = git(['hash-object', '--stdin-paths'], top, { input: existing.join('\n') + '\n' });
