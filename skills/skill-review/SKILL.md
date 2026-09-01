@@ -34,9 +34,9 @@ records turn into edits: which reminder converted, which rule fired for nothing,
 which gate stood in the way three times before anybody ran `/verify`, and which
 version of a skill caught less than the one before it.
 
-Human-triggered on purpose. Detection is automatic (the self-check runs at every
-session start); reinforcement is a decision Kyoung makes, once a week, looking at
-numbers.
+Human-triggered on purpose. Detection is automatic (the self-check runs when a
+session starts or is resumed into, not on a `/clear` or a compaction);
+reinforcement is a decision Kyoung makes, once a week, looking at numbers.
 
 **The prime directive: every number you say comes from the report you just ran.**
 Not from memory of last week, not from a file you skimmed. If the report does
@@ -141,23 +141,32 @@ distilled wiki over them. Everything below happens in
 
 ```
 ls ~/Self-GraphDB/raw/skill-runs/ 2>/dev/null
-wc -l ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl        # the count you have to beat
-grep -o '"id":"[^"]*"' ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl | sort
+wc -l ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl 2>/dev/null   # the count you have to beat
+grep -o '"id":"[^"]*"' ~/Self-GraphDB/raw/skill-runs/<skill>.jsonl 2>/dev/null | sort
 cat ~/.claude/skill-runs/<skill>.jsonl
 ```
 
+**First run for a skill**, when `raw/skill-runs/<skill>.jsonl` does not exist
+yet: that is the normal starting state, not a failure. Both reads above say "No
+such file" (hence the `2>/dev/null`, or branch on `test -f` first), the number to
+beat is **0**, and the dedupe set is **empty**, so every line in the window gets
+appended.
+
 `Write` replaces a file, so append safely and prove it:
 
-1. Read the destination in full (the `wc -l` above is the number to beat) and
-   collect the `id` values already in it.
+1. Read the destination in full (the `wc -l` above is the number to beat, 0 when
+   the file does not exist yet) and collect the `id` values already in it.
 2. From the buffer, take the lines whose `ts` is inside the report's window and
    whose `id` is **not** already there, byte for byte as they came.
 3. Write the destination **once**, as every old line in its original order
-   followed by the new ones.
-4. `wc -l` again. The count must have grown by exactly the number you appended.
-   **Fewer lines than before means you just destroyed raw source material**: stop,
-   say so, and restore from git (`git -C ~/Self-GraphDB checkout -- <path>`)
-   before doing anything else.
+   followed by the new ones, and **end the file with a trailing newline**. `wc -l`
+   counts newlines, not lines: a file that ends without one counts one short, so
+   the next review reads the wrong number to beat and its growth comes out at
+   N+1, failing step 4 over a file that is in fact correct.
+4. `wc -l` again. The count must have grown by exactly the number you appended
+   (from 0 on a first run). **Fewer lines than before means you just destroyed
+   raw source material**: stop, say so, and restore from git
+   (`git -C ~/Self-GraphDB checkout -- <path>`) before doing anything else.
 
 `raw/` is immutable source material: never rewrite, reorder or reformat a line
 that is already there, and never drop one to make room.

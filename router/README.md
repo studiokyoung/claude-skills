@@ -18,9 +18,9 @@ record of every run so the skills can be improved from evidence later.
   having run it, it is reminded once more (once per session).
 - **save-memory reminder.** In the repos under `repo_groups.corp`, wrap-up phrasing
   ("wrap up", "마감", ...) triggers a reminder to run `save-memory` if it has not run.
-- **self-check.** At every session start the router probes itself against temp
-  directories and says nothing if it still works. A broken install announces
-  itself in one line instead of going quiet for a month.
+- **self-check.** When a session starts or is resumed into, the router probes
+  itself against temp directories and says nothing if it still works. A broken
+  install announces itself in one line instead of going quiet for a month.
 - **weekly review.** `report.mjs` aggregates the records into one deterministic
   report (conversions, gate cycles, catch rate per version, candidate edits), and
   `/skill-review` is the Friday ritual that reads it and files the week.
@@ -290,9 +290,13 @@ impressions.
 
 ## Self-check (SessionStart)
 
-`selfcheck.mjs` runs at every session start and answers the one question the log
-cannot: **is the router still wired, and does it still fire?** Six checks, about
-450 ms, silent while everything passes.
+`selfcheck.mjs` runs on SessionStart, on the `startup` and `resume` sources, and
+answers the one question the log cannot: **is the router still wired, and does it
+still fire?** A `/clear` or a compaction fires SessionStart again inside a session
+whose install cannot have changed since the last check, so those two are the only
+sources skipped and the four spawns are not spent on them. Every other source
+runs, including one this router has never heard of: an allowlist here is how a
+check goes quiet. Six checks, about 450 ms, silent while everything passes.
 
 | check | what it proves |
 |---|---|
@@ -301,7 +305,7 @@ cannot: **is the router still wired, and does it still fire?** Six checks, about
 | `probe.on-prompt` | the prompt hook still turns the reuse-scout rule's own `sample` sentence into a reminder |
 | `probe.pre-tool` | a new file under `components/` still draws the backstop reminder, and an unverified commit in a gated repo is still denied |
 | `probe.post-skill` | a `Skill` call still lands in a session ledger |
-| `node` | Node 22 or newer |
+| `node` | Node 22 or newer. Informational: it is recorded and counted, but it never flips the verdict, because nothing about the router is broken by an old Node |
 
 The three probes spawn the real hook scripts against a throwaway `HOME`, state
 directory, records directory and git checkout, with `SKILL_ROUTER_PROBE=1` in the
@@ -310,14 +314,18 @@ re-enter the check. The four spawns run in parallel, which is what keeps the
 whole thing inside a session-start budget.
 
 All green: nothing on stdout, one `health` record appended to
-`~/.claude/skill-runs/router.jsonl`, one `health` line in the log. Any failure:
-one line of context into the session naming each failed check with its reason,
-and the same list in the record. The repair is `/skill-router install`, run
-deliberately; a hook never rewrites `settings.json` mid-session, and a settings
-change only takes effect in a new session anyway.
+`~/.claude/skill-runs/router.jsonl`, one `health` line in the log. A blocking
+failure: one line of context into the session naming each failed check with its
+reason, and the same list in the record. A note on its own, an informational
+check like `node` with nothing blocking behind it, is written into the record
+(flagged `informational`) and counted by the weekly report under Health, but it
+stays out of the session and leaves the verdict `ok`; `--cli` prints it as a
+`⚠️` row under a `PASS` and still exits 0. The repair is `/skill-router install`,
+run deliberately; a hook never rewrites `settings.json` mid-session, and a
+settings change only takes effect in a new session anyway.
 
 ```bash
-node ~/claude-skills/router/selfcheck.mjs --cli   # the same six checks as a table, exit 1 on failure
+node ~/claude-skills/router/selfcheck.mjs --cli   # the same six checks as a table, exit 1 on a blocking failure (a note exits 0)
 ```
 
 `SKILL_ROUTER_SELFCHECK=0` switches it off for a session. Like every other hook

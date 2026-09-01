@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { routerDir, testEnv } from './helpers.mjs';
+import { routerDir, tmpDir, testEnv } from './helpers.mjs';
 import { normalizeWhy } from '../lib/report.mjs';
 
 const report = (env, args = []) => {
@@ -130,6 +130,41 @@ test('annotations and health records are reported', () => {
   assert.deepEqual(j.health.ok, 1);
   assert.deepEqual(j.health.fail, 1);
   assert.deepEqual(j.health.last_failures, [{ check: 'settings', reason: 'PreToolUse: pre-tool.mjs not registered' }]);
+});
+
+// The node check is informational: it rides along on a health record that is `ok`, so a report that
+// only reads the failures of failing records never shows it. A note is not a failure, and the two
+// have to be visible as different things.
+test('informational checks are counted as notes, on passing records too, without inflating the failures', () => {
+  const { env } = testEnv();
+  write(env, 'router', [
+    { type: 'health', ts: ago(30), ok: true, checks: { node: false, settings: true }, ms: 400, failures: [{ check: 'node', reason: 'v20.11.0 is below the v22 the router is written for', informational: true }] },
+    { type: 'health', ts: ago(20), ok: true, checks: { node: false, settings: true }, ms: 410, failures: [{ check: 'node', reason: 'v20.11.0 is below the v22 the router is written for', informational: true }] },
+    { type: 'health', ts: ago(10), ok: false, checks: { node: false, settings: false }, ms: 380, failures: [
+      { check: 'settings', reason: 'SessionStart: selfcheck.mjs not registered', informational: false },
+      { check: 'node', reason: 'v20.11.0 is below the v22 the router is written for', informational: true },
+    ] },
+  ]);
+  const j = report(env, ['--json']).json;
+  assert.equal(j.health.ok, 2);
+  assert.equal(j.health.fail, 1);
+  assert.deepEqual(j.health.notes, { node: 3 });
+  // the failing record's own note went to the notes, not into the failure list beside it
+  assert.deepEqual(j.health.last_failures, [{ check: 'settings', reason: 'SessionStart: selfcheck.mjs not registered', informational: false }]);
+  const md = report(env).stdout;
+  assert.match(md, /^ {2}- notes: node 3$/m);
+  assert.match(md, /^- self-check 2 ok · 1 failed$/m);
+});
+
+test('a run of informational-only health records leaves the failure count at zero and still shows the note', () => {
+  const { env } = testEnv();
+  write(env, 'router', [{ type: 'health', ts: ago(5), ok: true, checks: { node: false }, ms: 402, failures: [{ check: 'node', reason: 'v20.11.0 is below the v22 the router is written for', informational: true }] }]);
+  const j = report(env, ['--json']).json;
+  assert.equal(j.health.fail, 0);
+  assert.equal(j.health.ok, 1);
+  assert.deepEqual(j.health.notes, { node: 1 });
+  assert.deepEqual(j.health.last_failures, []);
+  assert.match(report(env).stdout, /^ {2}- notes: node 1$/m);
 });
 
 test('candidates are derived, not guessed', () => {
@@ -274,6 +309,33 @@ test('pattern-unused only fires for rules whose scope the window actually entere
   ]);
   const corpSubjects = report(corp.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
   assert.ok(corpSubjects.includes('save-memory-wrapup #0'), corpSubjects.join(','));
+});
+
+// Scope now comes from rules.mjs, the hooks' own resolver. A `*` rule is in scope in every window,
+// including one whose records name no repo at all, and a scoped rule only where its group was seen.
+test('a globally scoped rule is judged in a window whose records name no repo; a scoped one is not', () => {
+  const { env } = testEnv();
+  write(env, 'reuse-scout', [{ type: 'invoke', ts: ago(5), session_id: 'a', trigger: 'user' }]);
+  const subjects = report(env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
+  assert.ok(subjects.includes('reuse-scout-prompt #0'), subjects.join(','));
+  assert.ok(!subjects.some((x) => x.startsWith('save-memory-wrapup')), subjects.join(','));
+});
+
+test('an inline repo array scopes a pattern the same way a group name does', () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(routerDir, 'skill-rules.json'), 'utf8'));
+  raw.rules.find((r) => r.id === 'save-memory-wrapup').repos = ['corp-mobile'];
+  const file = path.join(tmpDir('rules-'), 'skill-rules.json');
+  fs.writeFileSync(file, JSON.stringify(raw));
+
+  const off = testEnv({ ROUTER_RULES: file });
+  write(off.env, 'reuse-scout', [{ type: 'invoke', ts: ago(5), repo: 'portfolio-html', session_id: 'a', trigger: 'user' }]);
+  const offSubjects = report(off.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
+  assert.ok(!offSubjects.some((x) => x.startsWith('save-memory-wrapup')), offSubjects.join(','));
+
+  const on = testEnv({ ROUTER_RULES: file });
+  write(on.env, 'reuse-scout', [{ type: 'invoke', ts: ago(5), repo: 'corp-mobile', session_id: 'a', trigger: 'user' }]);
+  const onSubjects = report(on.env, ['--json']).json.candidates.filter((c) => c.kind === 'pattern-unused').map((c) => c.subject);
+  assert.ok(onSubjects.includes('save-memory-wrapup #0'), onSubjects.join(','));
 });
 
 test('a --since ahead of the clock is an empty window, never a negative one', () => {

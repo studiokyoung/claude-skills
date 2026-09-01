@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { stateDir } from './paths.mjs';
+import { inScope } from './rules.mjs';
 
 const bump = (o, k, n = 1) => { o[k] = (o[k] || 0) + n; };
 const list = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
@@ -73,7 +74,7 @@ export function aggregate(records, window) {
   const skills = {};
   const S = (name) => (skills[name] ||= emptySkill());
   const totals = { records: records.length, invoke: 0, remind: 0, run: 0, gate: 0, annotation: 0, health: 0 };
-  const health = { ok: 0, fail: 0, last_failures: [], last_fail_ts: null };
+  const health = { ok: 0, fail: 0, notes: {}, last_failures: [], last_fail_ts: null };
   const reminders = [];
   const gateLines = [];
   // key: skill + session, value: when that skill actually ran there. What a reminder converts into.
@@ -84,8 +85,13 @@ export function aggregate(records, window) {
     const type = r.type || 'run';
     if (type === 'health') {
       totals.health++;
+      const entries = list(r.failures).filter((f) => f && typeof f === 'object');
+      // An informational check rides along on a record that is `ok` (an old node version breaks
+      // nothing), so the notes are counted off every record, passing or not. Counting them as
+      // failures would cry wolf; dropping them is how a note nobody ever sees stays unfixed.
+      for (const f of entries) if (f.informational) bump(health.notes, f.check || 'unknown');
       if (r.ok) health.ok++;
-      else { health.fail++; health.last_failures = list(r.failures); health.last_fail_ts = r.ts; }
+      else { health.fail++; health.last_failures = entries.filter((f) => !f.informational); health.last_fail_ts = r.ts; }
       continue;
     }
     const name = r.skill;
@@ -233,11 +239,11 @@ export function candidates(records, agg, loaded) {
       if (rule.event !== 'prompt') continue;
       // A pattern cannot be called unused over a window that never entered its scope: a corp-only
       // rule matching nothing during a week spent in the portfolio says nothing about the pattern.
-      const scope = rule.repos ?? '*';
-      if (scope !== '*') {
-        const group = Array.isArray(scope) ? scope : (loaded.repoGroups[scope] || []);
-        if (!group.some((name) => seen.has(name))) continue;
-      }
+      // Scope is resolved by rules.mjs, the same call the hooks route on, so the review can never
+      // drift from the table. `inScope(rule, null, …)` is the "everywhere" question: a `*` rule is in
+      // scope even over a window whose records name no repo at all.
+      const everywhere = inScope(rule, null, loaded.repoGroups);
+      if (!everywhere && ![...seen].some((repo) => inScope(rule, repo, loaded.repoGroups))) continue;
       (rule.patterns || []).forEach((p, i) => {
         const subject = `${rule.id} #${i}`;
         if (!fired.has(subject)) out.push({ kind: 'pattern-unused', subject, detail: String(p).slice(0, 60) });
@@ -307,6 +313,7 @@ export function renderMd(agg) {
   L.push('');
   L.push('## Health');
   L.push(`- self-check ${agg.health.ok} ok · ${agg.health.fail} failed`);
+  if (agg.health.notes && Object.keys(agg.health.notes).length) L.push(`  - notes: ${pairs(agg.health.notes)}`);
   if (agg.health.last_failures.length) {
     L.push(`  - last failure ${agg.health.last_fail_ts}:`);
     for (const f of agg.health.last_failures) L.push(`    - ${f.check}: ${f.reason}`);

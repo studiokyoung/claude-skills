@@ -1,6 +1,6 @@
 ---
 name: skill-router
-description: Operator console for the skill router — the hooks that gate web-repo commits behind /verify, remind about reuse-scout and save-memory, self-check at every session start, and record every skill run (remind, invoke, gate, run, annotation). Use for "/skill-router", "is the router on", "why didn't the reminder fire", "why was my commit denied", "the verify gate is blocking me", "add a repo to the gate", "turn the router off / back on", "show me the router log / the run records". Reports only what a command in this run printed, from the read-only console and the self-check, and installs or uninstalls after an explicit yes. Not the gate itself (that is /verify), not the weekly review (/skill-review), not a diff review (/explain-diff).
+description: Operator console for the skill router — the hooks that gate web-repo commits behind /verify, remind about reuse-scout and save-memory, self-check at session start and resume, and record every skill run (remind, invoke, gate, run, annotation). Use for "/skill-router", "is the router on", "why didn't the reminder fire", "why was my commit denied", "the verify gate is blocking me", "add a repo to the gate", "turn the router off / back on", "show me the router log / the run records". Reports only what a command in this run printed, from the read-only console and the self-check, and installs or uninstalls after an explicit yes. Not the gate itself (that is /verify), not the weekly review (/skill-review), not a diff review (/explain-diff).
 user-invocable: true
 argument-hint: "[status|log [n]|rules|records [skill]|why-denied|install|uninstall|doc]"
 metadata:
@@ -27,9 +27,9 @@ allowed-tools:
 
 The router is four hooks, so it has no command of its own: it fires on prompts
 and tool calls, denies a commit that has no passing `/verify` behind it, checks
-itself at every session start, and appends a line to a log nobody reads until
-something surprises them. This skill is the human end of it — what is installed,
-what fired, what it decided, and how to turn it on or off.
+itself when a session starts or is resumed into, and appends a line to a log
+nobody reads until something surprises them. This skill is the human end of it —
+what is installed, what fired, what it decided, and how to turn it on or off.
 
 **The prime directive: read it, don't remember it.** Every line you report comes
 from a command run in *this* turn. Two read-only programs do almost all of it —

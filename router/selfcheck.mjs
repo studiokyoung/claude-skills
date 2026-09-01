@@ -12,8 +12,10 @@ import { routerDir, rulesPath, settingsPath } from './lib/paths.mjs';
 import { loadRules } from './lib/rules.mjs';
 import { appendRecord } from './lib/records.mjs';
 
-// The session starts worth re-checking: a real new session, or one being resumed into.
-const SOURCES = ['startup', 'resume'];
+// The session starts NOT worth re-checking. A denylist rather than an allowlist: a source this
+// router has never heard of runs the check, because a check that skips what it does not recognise is
+// how a broken install stays quiet for a month.
+const SKIP_SOURCES = ['clear', 'compact'];
 
 const pass = (name, detail) => ({ name, ok: true, detail });
 const fail = (name, detail) => ({ name, ok: false, detail });
@@ -139,9 +141,13 @@ function stageGateRepo(root, name) {
     // Two git calls plus the 5 s probe kill has to stay clear of the hook's 10 s timeout, and neither
     // of these ever takes more than a few tens of milliseconds on a repo this size.
     const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', timeout: 1500, stdio: 'ignore' });
-    git('init', '-q');
+    // spawnSync does not throw when git is missing, exits non-zero, or is killed at that timeout: it
+    // RETURNS the failure on the result. Unchecked, the probe would run against a directory that is
+    // no repo at all and report the commit gate broken, the one alarm this check must never invent.
+    const ok = (r) => Boolean(r) && !r.error && r.status === 0;
+    if (!ok(git('init', '-q'))) return null;
     fs.writeFileSync(path.join(repo, 'app', 'probe.tsx'), 'export const probe = 1;\n');
-    git('add', 'app/probe.tsx');
+    if (!ok(git('add', 'app/probe.tsx'))) return null;
     return repo;
   } catch { return null; }
 }
@@ -263,9 +269,9 @@ if (process.argv.slice(2).includes('--cli')) {
     const input = await readStdin();
     if (input && input.hook_event_name && input.hook_event_name !== 'SessionStart') return;
     // A /clear or a compaction fires SessionStart again inside a session whose install cannot have
-    // changed since the last check, and the probes cost four spawns. A payload carrying no `source`
-    // at all still runs, so a bare invocation is never silently skipped.
-    if (input && input.source !== undefined && !SOURCES.includes(input.source)) return;
+    // changed since the last check, and the probes cost four spawns. Only those two are skipped:
+    // a missing, null, empty or unfamiliar `source` is checked, never silently passed over.
+    if (input && SKIP_SOURCES.includes(input.source)) return;
     const { checks, ms } = await runChecks();
     const failures = record(checks, ms);
     if (!failures.length) return;

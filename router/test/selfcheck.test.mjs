@@ -186,7 +186,7 @@ test('SKILL_ROUTER_SELFCHECK=0 and SKILL_ROUTER_PROBE=1 skip it entirely: no out
   assert.deepEqual(health(probe.root), []);
 });
 
-test('a /clear or a compaction does not re-run the probes; startup, resume and a bare payload do', () => {
+test('only /clear and a compaction skip the probes; every other source runs, known or not', () => {
   for (const source of ['clear', 'compact']) {
     const { root, env } = testEnv();
     writeSettings(root, settingsFor(root));
@@ -195,19 +195,42 @@ test('a /clear or a compaction does not re-run the probes; startup, resume and a
     assert.equal(r.stdout.trim(), '', source);
     assert.deepEqual(health(root), [], `source ${source} must not spend four spawns`);
   }
-  const resumed = testEnv();
-  writeSettings(resumed.root, settingsFor(resumed.root));
-  runHook('selfcheck.mjs', start({ source: 'resume' }), resumed.env);
-  assert.equal(health(resumed.root).length, 1);
 
-  // A payload that carries no source at all is still checked, so a bare invocation is never silently
-  // skipped by a Claude Code version that does not send one.
-  const bare = testEnv();
-  writeSettings(bare.root, settingsFor(bare.root));
-  const noSource = start();
-  delete noSource.source;
-  runHook('selfcheck.mjs', noSource, bare.env);
-  assert.equal(health(bare.root).length, 1);
+  // A denylist, deliberately. An allowlist would let a source this router has never heard of, a
+  // future Claude Code sending `sdk` or nothing at all, switch the check off without saying so, and
+  // a self-check that goes quiet for a month is exactly what it exists to prevent.
+  const bare = start();
+  delete bare.source;
+  const runs = [['startup', start()], ['resume', start({ source: 'resume' })], ['null', start({ source: null })],
+    ['empty', start({ source: '' })], ['unknown', start({ source: 'sdk' })], ['no source key', bare]];
+  for (const [label, payload] of runs) {
+    const { root, env } = testEnv();
+    writeSettings(root, settingsFor(root));
+    runHook('selfcheck.mjs', payload, env);
+    assert.equal(health(root).length, 1, `source ${label} must still be checked`);
+  }
+});
+
+// The gate probe stages its own throwaway checkout with spawnSync, which reports a git that is
+// missing, failing or killed at the timeout by RETURNING the failure rather than throwing. Left
+// unchecked, the probe commits into a directory that is not a repo and blames the gate for letting
+// it through. The self-check may say it could not build the checkout; it may never cry wolf.
+test('a git that fails or hangs reads as a checkout that could not be built, never as a gate that let a commit through', () => {
+  for (const [label, script] of [['exits 1', '#!/bin/sh\nexit 1\n'], ['hangs past the timeout', '#!/bin/sh\nsleep 10\n']]) {
+    const shim = tmpDir('git-shim-');
+    fs.writeFileSync(path.join(shim, 'git'), script, { mode: 0o755 });
+    fs.chmodSync(path.join(shim, 'git'), 0o755);
+    const { root, env } = testEnv({ PATH: `${shim}${path.delimiter}${process.env.PATH}` });
+    writeSettings(root, settingsFor(root));
+    const r = runHook('selfcheck.mjs', start(), env);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    const h = health(root).at(-1);
+    assert.equal(h.checks['probe.pre-tool'], false, label);
+    const why = h.failures.find((f) => f.check === 'probe.pre-tool').reason;
+    assert.match(why, /could not build a throwaway \S+ checkout to probe with/, label);
+    assert.doesNotMatch(why, /was not denied/, label);
+    assert.match(context(r), /could not build a throwaway/, label);
+  }
 });
 
 test('--cli prints a table, exits 0 when green and 1 when not, and writes nothing', () => {
