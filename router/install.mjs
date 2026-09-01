@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+// ~/claude-skills/router/install.mjs — register the router in a Claude Code settings file (idempotent).
+//   node install.mjs                      → ~/.claude/settings.json
+//   node install.mjs --settings <path>    → another settings file
+//   node install.mjs --dry-run | --uninstall
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { parseArgs } from './lib/args.mjs';
+import { routerDir } from './lib/paths.mjs';
+import { loadRules } from './lib/rules.mjs';
+
+const a = parseArgs(process.argv.slice(2));
+const settingsPath = path.resolve(typeof a.settings === 'string' ? a.settings : path.join(os.homedir(), '.claude', 'settings.json'));
+const R = routerDir();
+const ENTRIES = [
+  { event: 'UserPromptSubmit', matcher: null, script: 'on-prompt.mjs' },
+  { event: 'PreToolUse', matcher: 'Bash|Write', script: 'pre-tool.mjs' },
+  { event: 'PostToolUse', matcher: 'Skill', script: 'post-skill.mjs' },
+];
+const ALLOW = loadRules().allowSkills.map((s) => `Skill(${s})`);
+const ENV = { SKILL_RUNS_DIR: path.join(os.homedir(), '.claude', 'skill-runs') };
+const uninstall = a.uninstall === true;
+
+let settings = {};
+if (fs.existsSync(settingsPath)) {
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
+  catch (e) { console.error(`router: cannot parse ${settingsPath}: ${e.message}`); process.exit(1); }
+}
+const changes = [];
+const isOurs = (h) => h && typeof h.command === 'string' && h.command.startsWith(`node ${R}/`);
+
+settings.hooks ||= {};
+for (const { event, matcher, script } of ENTRIES) {
+  const list = settings.hooks[event] || [];
+  if (uninstall) {
+    const kept = list.filter((entry) => !(entry.hooks || []).some(isOurs));
+    if (kept.length !== list.length) changes.push(`hooks.${event}: removed ${script}`);
+    if (kept.length) settings.hooks[event] = kept; else delete settings.hooks[event];
+    continue;
+  }
+  const present = list.some((entry) => (entry.hooks || []).some((h) => isOurs(h) && h.command.endsWith(`/${script}`)));
+  if (present) continue;
+  const entry = {};
+  if (matcher) entry.matcher = matcher;
+  entry.hooks = [{ type: 'command', command: `node ${R}/${script}`, timeout: 5 }];
+  settings.hooks[event] = [...list, entry];
+  changes.push(`hooks.${event}: added ${script}`);
+}
+if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+
+settings.permissions ||= {};
+settings.permissions.allow ||= [];
+for (const rule of ALLOW) {
+  const has = settings.permissions.allow.includes(rule);
+  if (uninstall && has) { settings.permissions.allow = settings.permissions.allow.filter((x) => x !== rule); changes.push(`permissions.allow: removed ${rule}`); }
+  if (!uninstall && !has) { settings.permissions.allow.push(rule); changes.push(`permissions.allow: added ${rule}`); }
+}
+
+settings.env ||= {};
+for (const [k, v] of Object.entries(ENV)) {
+  if (uninstall && k in settings.env) { delete settings.env[k]; changes.push(`env: removed ${k}`); }
+  if (!uninstall && !(k in settings.env)) { settings.env[k] = v; changes.push(`env: set ${k}=${v}`); }
+}
+if (Object.keys(settings.env).length === 0) delete settings.env;
+
+if (changes.length === 0) { console.log('router: nothing to change'); process.exit(0); }
+if (a['dry-run'] === true) { console.log(`router (dry-run) would change ${settingsPath}:\n  ${changes.join('\n  ')}`); process.exit(0); }
+if (fs.existsSync(settingsPath)) {
+  const bak = `${settingsPath}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  fs.copyFileSync(settingsPath, bak);
+  console.log(`router: backup ${bak}`);
+}
+fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+console.log(`router: updated ${settingsPath}\n  ${changes.join('\n  ')}`);
