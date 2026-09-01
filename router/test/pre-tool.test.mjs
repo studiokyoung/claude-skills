@@ -163,7 +163,7 @@ test('a broken rules file logs and allows; phantom redirect targets are ignored;
   assert.match(logOf(root), /rules-load-failed/);
   const home = runHook('pre-tool.mjs', bash(dir, "cat > ~/proj/lib/x.ts <<'EOF'\nx\nEOF", { session_id: 's-t' }), env);
   assert.equal(home.stdout.trim(), '');
-  const dollar = runHook('pre-tool.mjs', bash(dir, "cat > $OUT/lib/x.ts <<'EOF'\nx\nEOF", { session_id: 's-t' }), env);
+  const dollar = runHook('pre-tool.mjs', bash(dir, "cat > $OUT/lib/x.ts <<'EOF'\nx\nEOF", { session_id: 's-u' }), env);
   assert.equal(dollar.stdout.trim(), '');
   const rules = JSON.parse(fs.readFileSync(env.ROUTER_RULES, 'utf8'));
   rules.rules.find((x) => x.id === 'reuse-scout-new-file').message = '';
@@ -175,4 +175,18 @@ test('a broken rules file logs and allows; phantom redirect targets are ignored;
   const blank = runHook('pre-tool.mjs', bash(dir, 'git commit -m "x"'), { ...env, ROUTER_RULES: file });
   assert.equal(blank.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.equal(blank.json.hookSpecificOutput.permissionDecisionReason, 'verify gate: marker missing');
+});
+
+test('an unresolvable or tilde cd base falls back to the hook repo (never out-of-scope)', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  for (const cmd of ['cd $HOME/portfolio-html && git commit -m "x"', 'cd web && cd .. && git commit -m "x"', 'cd web && npm test && cd - && git commit -m "x"']) {
+    const r = runHook('pre-tool.mjs', bash(dir, cmd), env);
+    assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny', cmd);
+  }
+  const homeEnv = { ...env, HOME: path.dirname(dir) };
+  const other = makeRepo('Self-GraphDB');
+  const tilde = runHook('pre-tool.mjs', bash(other.dir, 'cd ~/portfolio-html && git commit -m "x"'), homeEnv);
+  assert.equal(tilde.json && tilde.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(logOf(root), /\tcommit\tverify-commit-gate\tportfolio-html\tdeny\t/);
 });

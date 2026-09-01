@@ -1,5 +1,6 @@
 // ~/claude-skills/router/lib/gate.mjs
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { rulesFor, matchPath } from './rules.mjs';
 import { toplevel, fingerprint, readMarker } from './git.mjs';
@@ -16,6 +17,10 @@ const realCwd = (c) => {
 // reminder on a file that will never exist under that name.
 const PHANTOM = /^~|\$/;
 
+// A shell would have expanded `cd ~/x` before git ever ran, but the hook sees the literal text.
+// Only a leading ~ is recoverable here; a $VAR base stays unresolvable and relies on the fallback below.
+const expandHome = (p) => (p === '~' || p.startsWith('~/') ? path.join(process.env.HOME || os.homedir(), p.slice(1)) : p);
+
 // A rule may carry no message; a deny must still say why.
 const denyMessage = (rule, why) => (rule.message ? String(rule.message).replace('{why}', why) : `verify gate: ${why}`);
 
@@ -24,8 +29,10 @@ export function decideCommit(loaded, input, parsed) {
   const cwd = realCwd(input.cwd);
   // The repo is the one the command itself targets (`git -C x`, or a preceding `cd x`) — not the
   // hook's cwd, which `cd repo && git commit` would otherwise let the gate read from the wrong repo.
-  const base = path.resolve(cwd, c.base || c.cPath || '.');
-  const top = toplevel(base);
+  const base = path.resolve(cwd, expandHome(c.base || c.cPath || '.'));
+  // …but a base we cannot resolve (an unexpanded $VAR, or `cd web && cd ..` since cd does not compose)
+  // must fall back to the hook's own repo. Reading it as "no repo" would silently allow the commit.
+  const top = toplevel(base) || toplevel(cwd);
   const repo = top ? path.basename(top) : null;
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
