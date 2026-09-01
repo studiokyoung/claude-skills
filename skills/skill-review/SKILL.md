@@ -83,6 +83,12 @@ Read it **whole** before writing a word of judgment. It is deterministic: the
 same records give the same report, so anything surprising in it is a fact about
 the week, not about the run.
 
+A scheduled agent may already have posted this same report and filed it as
+`_meta/artifacts/skill-runs/weekly-<date>.md`; run `report.mjs` here anyway,
+because nothing has advanced the watermark yet so the window is identical, and if
+the two copies differ then the window moved since the morning, which the report
+should say.
+
 What the sections mean:
 
 | section | the question it answers |

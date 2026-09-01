@@ -350,6 +350,13 @@ The window runs from the `last` timestamp in
 `--since` overrides both. `--mark` writes the watermark to now and prints the one
 it replaced, so the next review starts where this one stopped.
 
+The mechanical half can also run on its own. A cron entry or a launchd agent that
+runs `report.mjs --md` on review morning and posts the markdown wherever the owner
+reads it puts the week's numbers in front of them before the ritual starts. Such a
+job must not pass `--mark`: the watermark belongs to `/skill-review`, which advances
+it only when the review closes, so the scheduled copy and the ritual read exactly
+the same window.
+
 Per skill: invokes by trigger; reminders by rule with the conversion rate (a
 reminder the skill actually followed in the same session) and the excerpts of the
 ones that converted nothing; runs by verdict, version, per-gate status and summed
