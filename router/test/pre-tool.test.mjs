@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runHook, testEnv, makeRepo, hookInput } from './helpers.mjs';
+import { runHook, testEnv, makeRepo, hookInput, tmpDir } from './helpers.mjs';
 import { loadRules, repoOf } from '../lib/rules.mjs';
 
 const mode = loadRules().preToolUseContext;
@@ -238,4 +238,27 @@ test('a subshell and a -C composed with cd are gated by the repo they target', (
   assert.equal(here.json && here.json.hookSpecificOutput.permissionDecision, 'deny');
   const up = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir}/web && git -C .. commit web/app/page.tsx -m "x"`), env);
   assert.equal(up.json && up.json.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('a repo reached through a symlinked parent is still gated', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  const link = path.join(tmpDir('link-'), 'projects');
+  fs.symlinkSync(path.dirname(dir), link);
+  const other = makeRepo('Self-GraphDB');
+  const r = runHook('pre-tool.mjs', bash(other.dir, `cd ${link}/portfolio-html && git commit web/app/page.tsx -m "x"`), env);
+  assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('a redirect after a cd is resolved under that cd, not the hook cwd', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  const scratch = makeRepo('scratchpad', { 'web/components/Toast.tsx': 'x' });
+  // The file already exists where it is actually written, so nothing is being created: the
+  // session's one reminder must not be burned on <hookcwd>/web/components/Toast.tsx.
+  const quiet = runHook('pre-tool.mjs', bash(dir, `cd ${scratch.dir} && cat > web/components/Toast.tsx <<'EOF'\nx\nEOF`, { session_id: 's-cd' }), env);
+  assert.equal(quiet.stdout.trim(), '');
+  const fires = runHook('pre-tool.mjs', bash(dir, `cd ${scratch.dir} && cat > web/components/New.tsx <<'EOF'\nx\nEOF`, { session_id: 's-cd2' }), env);
+  assert.ok(fires.json, 'a genuinely new file under the cd base still reminds');
 });

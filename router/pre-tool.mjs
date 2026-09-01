@@ -3,7 +3,7 @@
 import { failOpen, readStdin, emit, log } from './lib/io.mjs';
 import { loadRules } from './lib/rules.mjs';
 import { loadLedger, saveLedger } from './lib/ledger.mjs';
-import { parseCommand, bashWriteTargets } from './lib/commit.mjs';
+import { parseCommand, bashWriteTargetsWithBase } from './lib/commit.mjs';
 import { decideCommit, decideBackstop } from './lib/gate.mjs';
 
 const deny = (reason) => emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
@@ -27,9 +27,9 @@ failOpen(async () => {
       if (d.decision === 'deny') deny(d.message);
       return;
     }
-    targets = bashWriteTargets(command);
+    targets = bashWriteTargetsWithBase(command);
   } else if (tool_name === 'Write') {
-    targets = tool_input && tool_input.file_path ? [tool_input.file_path] : [];
+    targets = tool_input && tool_input.file_path ? [{ target: tool_input.file_path, base: null }] : [];
   } else {
     return;
   }

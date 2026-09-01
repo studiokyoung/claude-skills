@@ -21,6 +21,15 @@ const PHANTOM = /^~|\$/;
 // Only a leading ~ is recoverable here; a $VAR base stays unresolvable and relies on the fallback below.
 const expandHome = (p) => (p === '~' || p.startsWith('~/') ? path.join(home(), p.slice(1)) : p);
 
+// toplevel() answers with a physical path, so a base reached through a symlink (a symlinked
+// checkout, /tmp on macOS) would push every pathspec outside `top`, empty the candidate set, and
+// read as "nothing to commit". Only the base DIRECTORY is realpathed: a pathspec may name a file
+// that does not exist yet, and it must stay the path git itself was given.
+const realBase = (cwd, base) => {
+  const abs = path.resolve(cwd, expandHome(base || '.'));
+  try { return fs.realpathSync(abs); } catch { return abs; }
+};
+
 // A rule may carry no message; a deny must still say why.
 const denyMessage = (rule, why) => (rule.message ? String(rule.message).replace('{why}', why) : `verify gate: ${why}`);
 
@@ -39,6 +48,7 @@ export function decideCommit(loaded, input, parsed) {
   // silently allow the commit. git then runs in the hook's cwd, so the pathspecs resolve there too:
   // keeping the outside base would push every path clear of `top` and empty the set into a silent allow.
   if (!top) { top = toplevel(cwd); eb = '.'; adds = adds.map((a) => ({ ...a, base: '.' })); }
+  else { eb = realBase(cwd, eb); adds = adds.map((a) => ({ ...a, base: realBase(cwd, a.base) })); }
   // Identity comes from the main checkout (worktrees), while `top` stays the working tree the
   // pathspecs, the marker and the fingerprint all belong to.
   const repo = repoOf(top);
@@ -69,9 +79,12 @@ export function decideBackstop(loaded, ledger, input, targets) {
     if (!rule.message) continue;
     if (rule.once_per_session && ledger.reminded[rule.id]) continue;
     if (rule.unless_ran && hasRun(ledger, rule.unless_ran)) continue;
-    for (const t of targets) {
-      if (PHANTOM.test(t)) continue;
-      const abs = path.resolve(cwd, t);
+    for (const { target, base } of targets) {
+      // The write lands under the command's own `cd`, not the hook's cwd: resolving it here is
+      // what keeps the once-per-session reminder off a file that was never going to be created.
+      const eb = base ? expandHome(base) : '.';
+      if (PHANTOM.test(target) || PHANTOM.test(eb)) continue;
+      const abs = path.resolve(realBase(cwd, eb), target);
       if (fs.existsSync(abs)) continue;
       const rel = path.relative(top || cwd, abs).replace(/\\/g, '/');
       if (matchPath(rule, rel)) return { rule, hit: abs, rel, repo };
