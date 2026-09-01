@@ -99,20 +99,23 @@ function maskQuoted(line) {
 // the output, because pathspec extraction needs them; SKIP_VERIFY blanks them separately.
 //
 // A BOGUS opener is the dangerous direction: its tag never appears, so every following line is
-// dropped and a real `git commit` becomes invisible (a silent allow). Hence three guards: the
-// `<<` may not be part of a `<<<` herestring, it is located in the quote-masked line so a
-// mention of `<< EOF` inside a string is not an opener, and the tag has to look like a word so
-// `$(( a << 2 ))` is not one either. The tag itself is read back off the REAL line, since a
-// legitimate one may be quoted (`<<'EOF'`).
-const HEREDOC = /(?<!<)<<(?!<)/g;
-const HEREDOC_TAG = /^<<(-?)\s*(?:"([^"]+)"|'([^']+)'|\\?([A-Za-z_]\w*))/;
+// dropped and a real `git commit` becomes invisible (a silent allow). Hence the guards: the `<<`
+// must sit at a redirect position (start or whitespace before it, never part of a `<<<`
+// herestring), it is located in the quote-masked line so a mention of `<< EOF` inside a string
+// is not an opener, the tag has to look like a word, and what follows the tag has to be the end
+// of the line or a redirect/separator. That last one is what keeps `$(( 1 << n ))` and
+// `see << ZZZ for details` from opening one. The tag itself is read back off the REAL line,
+// since a legitimate one may be quoted (`<<'EOF'`).
+const HEREDOC = /(?<=^|\s)<<(?!<)/g;
+const HEREDOC_TAG = /^<<(-?)\s*(?:"([^"]+)"|'([^']+)'|\\?([A-Za-z_]\w*))(?=\s*(?:[>;&|]|$))/;
 function stripHeredocs(cmd) {
   const lines = String(cmd || '').split('\n');
   const kept = [];
   for (let i = 0; i < lines.length; i++) {
-    kept.push(lines[i]);
-    for (const m of maskQuoted(lines[i]).matchAll(HEREDOC)) {
-      const t = lines[i].slice(m.index).match(HEREDOC_TAG);
+    const line = lines[i]; // `i` moves as bodies are consumed; every opener on THIS line reads it
+    kept.push(line);
+    for (const m of maskQuoted(line).matchAll(HEREDOC)) {
+      const t = line.slice(m.index).match(HEREDOC_TAG);
       if (!t) continue;
       const tag = t[2] ?? t[3] ?? t[4];
       const dash = t[1] === '-';

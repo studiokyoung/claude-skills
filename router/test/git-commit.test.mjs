@@ -284,3 +284,14 @@ test('parseCommand: a herestring or a quoted mention of << is not a heredoc open
   assert.equal(parseCommand('cat > n.md <<EOF\nx\nEOF\ngit commit -am y').isCommit, true);
   assert.equal(parseCommand("cat > n.md <<'EOF'\ngit commit -m x\nEOF").isCommit, false);
 });
+
+test('parseCommand: two heredoc openers on one line, and a << that is not one', () => {
+  // Each opener must read its tag off its OWN line: `i` has already moved to the end of the
+  // first body by the time the second one is read.
+  assert.equal(parseCommand('cat <<A > x <<B > y\na1\nA\ngit commit -m "in body"\nB').isCommit, false);
+  assert.equal(parseCommand('cat <<A > x <<B > y\na1\nA\nplease see << ZZZ for details\nB\ngit commit -am real').isCommit, true);
+  // A word after a shift operator is not a tag: the opener has to sit at a redirect position.
+  assert.equal(parseCommand('x=$(( 1 << n ))\ngit commit -am real').isCommit, true);
+  assert.equal(parseCommand('cat <<A > x <<B > y\na1\nA\nb1\nB\ngit commit -am real').isCommit, true);
+  assert.equal(parseCommand('cat <<EOF | tee n.md\ngit commit -m in-body\nEOF').isCommit, false);
+});
