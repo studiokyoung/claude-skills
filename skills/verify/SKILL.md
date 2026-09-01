@@ -2,9 +2,9 @@
 name: verify
 description: Runs Kyoung's full pre-commit / pre-handoff verification gate in one command and prints an honest PASS/FAIL table. Use before committing, before handing work off, or when he says "verify", "check it", "is this safe to ship", "run the gate", and right after a change lands. Detects the stack and runs each applicable gate — git state, TypeScript typecheck, jest/vitest tests, and MULTI-VIEWPORT screenshots (mobile 390, tablet 768, desktop 1440 as viewport tiles, never a full-page shot) so below-the-fold and mobile-only breakage can't slip through. On a mobile app (Expo/React Native), the UI gate is the repo's MAESTRO flows on a booted simulator/device instead of browser screenshots. Skips a gate only with a stated reason and never reports "verified" when a step did not actually run. Not a diff-quality review (use /explain-diff) or a correctness bug hunt (use /code-review).
 user-invocable: true
-argument-hint: "[routes to shoot, e.g. / /work/corppay-app] [no-serve]"
+argument-hint: "[routes or flows, e.g. / /work/x] [no-serve]"
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
 allowed-tools:
   - Bash(git status:*)
   - Bash(git log:*)
@@ -143,72 +143,56 @@ project's own playwright + dev server.
    a skip/fail: `playwright-missing` → ⏭️SKIP "no playwright in project";
    `server-not-ready` / `server-down-no-serve` → ❌FAIL or ⏭️SKIP with the reason.
 
-### Mobile E2E screenshots (Maestro) — when the repo is React Native/Expo with `.maestro/`
-Native apps have no web-UI gate; their real-verification equivalent is a
-**Maestro screenshot smoke on the iOS simulator**. Signals: `react-native` or
-`expo` in deps AND a `.maestro/` directory — both present means this gate
-**must run** (the web screenshot row stays ⏭️ "no web UI"). Preconditions,
-each a named ⏭️SKIP reason when missing: the `maestro` binary
-(`~/.maestro/bin/maestro`), a **booted** simulator with the dev build
-(`xcrun simctl list devices booted`), Metro serving the branch
-(`lsof -iTCP:8081 -sTCP:LISTEN`).
-
-```
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH="$HOME/.maestro/bin:$PATH" \
-  maestro test .maestro/staging/<probe>.yaml
-```
-
-- The probe flow lives in `.maestro/staging/` and screenshots the screens the
-  change touched into `/tmp/verify-<repo>-<ts>/`. In corp-mobile,
-  `97-probe-template.yaml` is the template; runtime gotchas live in
-  `.maestro/README.md`. Traps a probe must survive (all baked in the template):
-  - a cold dev-client launch lands on the DEVELOPMENT SERVERS launcher —
-    connect to the Metro row first;
-  - a system "Open in <App>?" alert **occludes the whole hierarchy** for
-    Maestro — clear a stale one at start, handle it after every `openLink`;
-  - RN ScrollViews keep below-the-fold rows in the hierarchy with off-clip
-    coordinates, so a tap can "complete" against nothing — use
-    `scrollUntilVisible` with `centerElement: true`, then **gate on the
-    outcome** (e.g. `notVisible` of the sheet) before asserting the
-    destination; never trust the tap alone.
-- ✅PASS = every flow assert passed AND the screenshots exist on disk. Report
-  every path; a human still eyeballs them. ❌FAIL = a flow assert failed —
-  that is the gate catching something; the debug screenshot in
-  `~/.maestro/tests/<timestamp>/` shows what the sim actually displayed.
-- The probe drives the shared dev simulator: it reuses the logged-in session
-  and resets nothing beyond what the app's dev tools stage in their store.
-
 ### Maestro flows — when the repo is a mobile app with `.maestro/` flows
 
 The app equivalent of the screenshot gate, promoted from the first field run
-(corp-mobile, 2026-09-01): a maestro flow drives the real UI on a real
-simulator and fails on what a static shot cannot see.
+(a React Native app, 2026-09-01): a maestro flow drives the real UI on a booted
+simulator and fails on what a static shot cannot see. Signals: `react-native`
+or `expo` in deps AND a `.maestro/` directory — both present means this gate
+**must run** (the web screenshots row stays ⏭️ "no web UI").
 
-1. Find the flows: `.maestro/config.yaml` plus `flows/` (and `subflows/`).
-   Choose the flows covering the screens the change touched (map changed files
-   to flows by name/route); when the mapping is unclear and the set is small,
-   run them all. Flow names given in the arguments override this.
-2. Preconditions, checked honestly, each its own reason:
-   - `maestro` CLI on PATH — missing → ⏭️SKIP "maestro not installed";
-   - a booted simulator/emulator or device (`xcrun simctl list devices booted`
-     / `adb devices`) — none → ⏭️SKIP "no booted device";
-   - a dev-client build needs Metro attached BEFORE the flow launches the app —
-     without it the launch fails, not the flow (field trap): start/attach the
-     dev server first, or mark ❌ with that reason, never blame the flow.
-3. Run `maestro test <flow>` per chosen flow, each with a hard timeout.
-   ✅PASS only when every chosen flow exits 0. On failure, ❌FAIL with the flow
-   name, the first failing step, and maestro's own screenshot/log path if it
-   wrote one.
-4. Known traps from the field run — encode, don't rediscover:
-   - dismiss stale system alerts first; a leftover permission dialog occludes
-     the hierarchy and fails unrelated assertions;
-   - a tap on ScrollView content outside the clip "completes" against nothing —
-     scroll it into view (centerElement) and gate on visibility before tapping;
+1. Preconditions, checked honestly, each a named ⏭️SKIP/❌FAIL reason:
+   - the `maestro` binary (`~/.maestro/bin/maestro`, or on PATH) — missing →
+     ⏭️SKIP "maestro not installed";
+   - a **booted** simulator/emulator or device (`xcrun simctl list devices
+     booted` / `adb devices`) — none → ⏭️SKIP "no booted device";
+   - a dev-client build needs Metro serving **before** the flow launches the
+     app (`lsof -iTCP:8081 -sTCP:LISTEN`) — without it the launch fails, not
+     the flow: attach the dev server first, or ❌ with that reason, never blame
+     the flow.
+2. Choose the flows covering the screens the change touched
+   (`.maestro/config.yaml` plus `flows/`, `subflows/`; map changed files to
+   flows by name/route, run them all when the mapping is unclear and the set is
+   small). Flow names in the arguments override this. For a change-specific
+   probe, keep one template flow per feature area under `.maestro/staging/` and
+   copy it; the repo's own `.maestro/README.md` is where its runtime gotchas
+   live.
+3. Run each chosen flow with a hard timeout (export the JDK maestro needs
+   first when the shell does not have one):
+   ```
+   PATH="$HOME/.maestro/bin:$PATH" maestro test .maestro/<flow>.yaml
+   ```
+4. ✅PASS = every chosen flow exits 0 **and** the screenshots it takes exist on
+   disk — report every path; a human still eyeballs them. ❌FAIL = a flow
+   assert failed, which is the gate catching something: name the flow, the
+   first failing step, and maestro's own debug screenshot under
+   `~/.maestro/tests/<timestamp>/` showing what the sim actually displayed.
+5. Known traps from the field run — encode, don't rediscover:
+   - a cold dev-client launch lands on the DEVELOPMENT SERVERS launcher —
+     connect to the Metro row first;
+   - a stale system alert ("Open in <App>?", permissions) **occludes the whole
+     hierarchy** — clear one at start and handle it after every `openLink`;
+   - ScrollViews keep below-the-fold rows in the hierarchy at off-clip
+     coordinates, so a tap can "complete" against nothing — use
+     `scrollUntilVisible` with `centerElement: true`, then **gate on the
+     outcome** (e.g. `notVisible` of the sheet) before asserting the
+     destination; never trust the tap alone;
    - `tapOn` by a glyph that also appears in an amount display is ambiguous —
      tap stable testIDs/chips, not rendered digits.
-5. The row's detail names the flows run and the device. Like screenshots, ✅
-   means the flows passed; everything maestro caught goes into `caught` in §4's
-   record, and the `gates` map carries it as `"maestro"`.
+6. The row's detail names the flows run and the device. The probe drives a
+   shared dev simulator: reuse the logged-in session and reset nothing beyond
+   what the app's own dev tooling stages. Everything maestro caught goes into
+   `caught` in §4's record, and the `gates` map carries it as `"maestro"`.
 
 ## 3. The PASS/FAIL table
 
