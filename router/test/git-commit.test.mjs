@@ -1,0 +1,90 @@
+// ~/claude-skills/router/test/git-commit.test.mjs
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { makeRepo, tmpDir, runHook, testEnv } from './helpers.mjs';
+import { fingerprint, markerPath, readMarker, writeMarker, clearMarker, stagedPaths, changedPaths, toplevel } from '../lib/git.mjs';
+import { parseCommand, bashWriteTargets, candidateSet } from '../lib/commit.mjs';
+
+test('parseCommand: plain, chained add, env override, -C, amend, non-commit, quoted echo', () => {
+  assert.equal(parseCommand('git commit -m "x"').isCommit, true);
+  const chained = parseCommand('git add -A && git commit -m "a && b"');
+  assert.equal(chained.isCommit, true); assert.equal(chained.adds[0].all, true);
+  const skip = parseCommand('SKIP_VERIFY=1 git commit -am "docs"');
+  assert.equal(skip.skip, true); assert.equal(skip.commit.all, true);
+  const c = parseCommand('git -C /tmp/x commit --amend --no-edit');
+  assert.equal(c.commit.cPath, '/tmp/x'); assert.equal(c.commit.amend, true);
+  assert.equal(parseCommand('git status && git log --oneline -3').isCommit, false);
+  assert.equal(parseCommand('echo "git commit -m x"').isCommit, false);
+  const cd = parseCommand('cd web && git add app/page.tsx lib && git commit -m "feat"');
+  assert.equal(cd.isCommit, true); assert.deepEqual(cd.adds[0].paths, ['app/page.tsx', 'lib']); assert.equal(cd.adds[0].all, false);
+  const heredoc = parseCommand('git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nbody\nEOF\n)"');
+  assert.equal(heredoc.isCommit, true);
+});
+
+test('bashWriteTargets: redirects, tee, heredoc, dev/null, quoted >', () => {
+  assert.deepEqual(bashWriteTargets("cat > web/components/Toast.tsx <<'EOF'\nx\nEOF"), ['web/components/Toast.tsx']);
+  assert.deepEqual(bashWriteTargets('echo hi > /dev/null'), []);
+  assert.deepEqual(bashWriteTargets('npm test 2>&1 | tee out.log'), ['out.log']);
+  assert.deepEqual(bashWriteTargets('printf x >> notes.md'), ['notes.md']);
+  assert.deepEqual(bashWriteTargets('echo ">"'), []);
+  assert.deepEqual(bashWriteTargets('ls -la'), []);
+});
+
+test('candidateSet: staged only, -a, git add dir, git add -A', () => {
+  const { dir, git } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a', 'web/lib/x.ts': 'b', 'README.md': 'r' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  fs.writeFileSync(path.join(dir, 'web/lib/x.ts'), 'b2');
+  fs.writeFileSync(path.join(dir, 'web/new.ts'), 'n');
+  git('add', 'web/app/page.tsx');
+  assert.deepEqual(candidateSet(dir, { all: false }, []), ['web/app/page.tsx']);
+  assert.deepEqual(candidateSet(dir, { all: true }, []).sort(), ['web/app/page.tsx', 'web/lib/x.ts']);
+  assert.deepEqual(candidateSet(dir, { all: false }, [{ all: false, paths: ['web/lib'] }]).sort(), ['web/app/page.tsx', 'web/lib/x.ts']);
+  assert.deepEqual(candidateSet(dir, { all: false }, [{ all: true, paths: [] }]).sort(), ['web/app/page.tsx', 'web/lib/x.ts', 'web/new.ts']);
+  assert.deepEqual(stagedPaths(dir), ['web/app/page.tsx']);
+  assert.deepEqual(changedPaths(dir).sort(), ['web/app/page.tsx', 'web/lib/x.ts', 'web/new.ts']);
+});
+
+test('fingerprint: stable, changes on tracked edit, on new untracked file, on same-length untracked edit', () => {
+  const { dir } = makeRepo('portfolio-html', { 'a.txt': 'aaaa' });
+  const f0 = fingerprint(dir);
+  assert.equal(fingerprint(dir), f0);
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'bbbb');
+  const f1 = fingerprint(dir); assert.notEqual(f1, f0);
+  fs.writeFileSync(path.join(dir, 'u.txt'), 'cccc');
+  const f2 = fingerprint(dir); assert.notEqual(f2, f1);
+  fs.writeFileSync(path.join(dir, 'u.txt'), 'dddd');
+  const f3 = fingerprint(dir); assert.notEqual(f3, f2);
+  assert.equal(fingerprint(path.join(dir)), f3);
+  assert.equal(fingerprint(tmpDir('nogit-')), null);
+});
+
+test('marker read/write/clear lives in .git and never in the tree', () => {
+  const { dir, git } = makeRepo('portfolio-html');
+  const p = markerPath(dir);
+  assert.equal(p, path.join(toplevel(dir), '.git', 'verify-pass'));
+  assert.equal(readMarker(dir), null);
+  assert.equal(writeMarker(dir, { fingerprint: 'f', ts: 't' }), true);
+  assert.deepEqual(readMarker(dir), { fingerprint: 'f', ts: 't' });
+  assert.equal(git('status', '--porcelain').stdout.trim(), '');
+  clearMarker(dir);
+  assert.equal(readMarker(dir), null);
+});
+
+test('mark-pass CLI writes a marker matching the live fingerprint; --clear removes; non-git reports', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'x' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'y');
+  const w = runHook('mark-pass.mjs', null, env, ['--root', path.join(dir, 'web'), '--gates', '{"git":"PASS","typecheck":"PASS"}', '--routes', '["/"]']);
+  assert.equal(w.json.ok, true);
+  const m = readMarker(dir);
+  assert.equal(m.fingerprint, fingerprint(dir));
+  assert.deepEqual(m.gates, { git: 'PASS', typecheck: 'PASS' });
+  assert.deepEqual(m.routes, ['/']);
+  assert.match(m.ts, /[+-]\d{2}:\d{2}$/);
+  const c = runHook('mark-pass.mjs', null, env, ['--root', dir, '--clear']);
+  assert.equal(c.json.cleared, true); assert.equal(readMarker(dir), null);
+  const n = runHook('mark-pass.mjs', null, env, ['--root', tmpDir('nogit-')]);
+  assert.deepEqual(n.json, { ok: false, reason: 'not-a-git-repo' });
+});
