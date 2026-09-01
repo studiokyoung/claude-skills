@@ -13,9 +13,20 @@ failOpen(() => {
   const root = path.resolve(typeof a.root === 'string' ? a.root : process.cwd());
   if (!toplevel(root)) { emit({ ok: false, reason: 'not-a-git-repo' }); return; }
   if (a.clear) { clearMarker(root); emit({ cleared: true }); return; }
+  // A malformed --gates/--routes is an error, never a silently null field: the marker is the record
+  // of what /verify actually ran.
+  const json = (k) => {
+    if (a[k] === undefined) return { ok: true, value: null };
+    const value = typeof a[k] === 'string' ? safeJson(a[k]) : null;
+    return { ok: value !== null || a[k] === 'null', value };
+  };
+  const gates = json('gates');
+  if (!gates.ok) { emit({ ok: false, reason: 'bad-gates-json' }); return; }
+  const routes = json('routes');
+  if (!routes.ok) { emit({ ok: false, reason: 'bad-routes-json' }); return; }
   const fp = fingerprint(root);
   if (!fp) { emit({ ok: false, reason: 'fingerprint-failed' }); return; }
-  const data = { fingerprint: fp, ts: localIso(), gates: safeJson(a.gates), routes: safeJson(a.routes) };
-  writeMarker(root, data);
+  const data = { fingerprint: fp, ts: localIso(), gates: gates.value, routes: routes.value };
+  if (!writeMarker(root, data)) { emit({ ok: false, reason: 'marker-write-failed' }); return; }
   emit({ ok: true, marker: markerPath(root), fingerprint: fp });
 });
