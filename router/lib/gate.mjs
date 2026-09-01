@@ -12,23 +12,36 @@ const realCwd = (c) => {
   try { return fs.realpathSync(base); } catch { return base; }
 };
 
+// `~/x` and `$OUT/x` are unexpanded shell text, not literal paths: never burn the once-per-session
+// reminder on a file that will never exist under that name.
+const PHANTOM = /^~|\$/;
+
+// A rule may carry no message; a deny must still say why.
+const denyMessage = (rule, why) => (rule.message ? String(rule.message).replace('{why}', why) : `verify gate: ${why}`);
+
 export function decideCommit(loaded, input, parsed) {
   const c = parsed.commit;
   const cwd = realCwd(input.cwd);
-  const base = c.cPath ? path.resolve(cwd, c.cPath) : cwd;
+  // The repo is the one the command itself targets (`git -C x`, or a preceding `cd x`) — not the
+  // hook's cwd, which `cd repo && git commit` would otherwise let the gate read from the wrong repo.
+  const base = path.resolve(cwd, c.base || c.cPath || '.');
   const top = toplevel(base);
   const repo = top ? path.basename(top) : null;
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
   if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo };
-  const cand = candidateSet(top, c, parsed.adds);
-  if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo };
-  if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo };
+  // null = a git listing failed. "Could not tell" is not "nothing to commit": skip both shortcuts
+  // and let the marker decide.
+  const cand = candidateSet(top, c, parsed.adds, cwd);
+  if (cand) {
+    if (cand.length === 0) return { decision: 'allow', why: 'nothing-to-commit', ruleId: rule.id, repo };
+    if (loaded.docsOnly && cand.every((p) => loaded.docsOnly.test(p))) return { decision: 'allow', why: 'docs-only', ruleId: rule.id, repo };
+  }
   const marker = readMarker(top);
   const fp = fingerprint(top);
   if (marker && fp && marker.fingerprint === fp) return { decision: 'allow', why: `verified ${marker.ts}`, ruleId: rule.id, repo };
-  const why = marker ? `tree changed since ${marker.ts}` : 'marker missing';
-  return { decision: 'deny', why, ruleId: rule.id, repo, message: String(rule.message || '').replace('{why}', why) };
+  const why = !fp ? 'fingerprint unavailable (git failed)' : marker ? `tree changed since ${marker.ts}` : 'marker missing';
+  return { decision: 'deny', why, ruleId: rule.id, repo, message: denyMessage(rule, why) };
 }
 
 export function decideBackstop(loaded, ledger, input, targets) {
@@ -38,9 +51,11 @@ export function decideBackstop(loaded, ledger, input, targets) {
   const repo = top ? path.basename(top) : null;
   for (const rule of rulesFor(loaded, 'new-file', repo)) {
     if (rule.mode !== 'remind') continue;
+    if (!rule.message) continue;
     if (rule.once_per_session && ledger.reminded[rule.id]) continue;
     if (rule.unless_ran && hasRun(ledger, rule.unless_ran)) continue;
     for (const t of targets) {
+      if (PHANTOM.test(t)) continue;
       const abs = path.resolve(cwd, t);
       if (fs.existsSync(abs)) continue;
       const rel = path.relative(top || cwd, abs).replace(/\\/g, '/');

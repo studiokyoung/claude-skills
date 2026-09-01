@@ -101,7 +101,78 @@ test('new-file backstop: fires once per session for Write and for a Bash heredoc
 test('malformed stdin, Edit tool, and non-commit Bash without redirects: exit 0, no output', () => {
   const { env } = testEnv();
   const { dir } = makeRepo('portfolio-html');
-  assert.equal(runHook('pre-tool.mjs', null, env).stdout.trim(), '');
+  const r = runHook('pre-tool.mjs', null, env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
   assert.equal(runHook('pre-tool.mjs', hookInput({ cwd: dir, tool_name: 'Edit', tool_input: { file_path: path.join(dir, 'web/components/New.tsx') } }), env).stdout.trim(), '');
   assert.equal(runHook('pre-tool.mjs', bash(dir, 'ls -la && git status'), env).stdout.trim(), '');
+});
+
+test('cd <repo> && git commit is gated by the target repo, not the hook cwd', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const other = makeRepo('Self-GraphDB');
+  const r = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir} && git commit -m "x"`), env);
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  const back = runHook('pre-tool.mjs', bash(dir, `cd ${other.dir} && git commit -m "x"`), env);
+  assert.equal(back.stdout.trim(), '');
+  assert.match(logOf(root), /\tcommit\t-\tSelf-GraphDB\tallow\tout-of-scope/);
+});
+
+test('an unstaged pathspec commit is gated; from a subdirectory too', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  const r = runHook('pre-tool.mjs', bash(dir, 'git commit -m "x" web/app/page.tsx'), env);
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  const sub = runHook('pre-tool.mjs', bash(path.join(dir, 'web'), 'git add app/page.tsx && git commit -m "x"'), env);
+  assert.equal(sub.json.hookSpecificOutput.permissionDecision, 'deny');
+  // Resolved against the real cwd, not the repo root: `../` out of a subdirectory otherwise escapes
+  // the repo, empties the candidate set and reads as nothing-to-commit.
+  const up = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a', 'src/new.ts': 'n' });
+  fs.writeFileSync(path.join(up.dir, 'src/new.ts'), 'n2');
+  const upward = runHook('pre-tool.mjs', bash(path.join(up.dir, 'web'), 'git add ../src/new.ts && git commit -m "x"'), env);
+  assert.equal(upward.json.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('git failure fails closed with an honest reason', () => {
+  const { env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const bad = path.join(dir, 'web/app/bad.txt');
+  fs.writeFileSync(bad, 'x'); fs.chmodSync(bad, 0o000);
+  try {
+    const r = runHook('pre-tool.mjs', bash(dir, 'git commit -am "x"'), env);
+    assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /fingerprint unavailable/);
+  } finally { fs.chmodSync(bad, 0o644); }
+  // An unreadable index fails the listing itself: "could not tell" must not read as nothing-to-commit.
+  const idx = path.join(dir, '.git/index');
+  fs.chmodSync(idx, 0o000);
+  try {
+    const r = runHook('pre-tool.mjs', bash(dir, 'git commit -m "x"'), env);
+    assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /fingerprint unavailable/);
+  } finally { fs.chmodSync(idx, 0o644); }
+});
+
+test('a broken rules file logs and allows; phantom redirect targets are ignored; message-less rules never emit', () => {
+  const { root, env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const broken = runHook('pre-tool.mjs', bash(dir, 'git commit -m "x"'), { ...env, ROUTER_RULES: path.join(root, 'missing.json') });
+  assert.equal(broken.status, 0); assert.equal(broken.stdout.trim(), '');
+  assert.match(logOf(root), /rules-load-failed/);
+  const home = runHook('pre-tool.mjs', bash(dir, "cat > ~/proj/lib/x.ts <<'EOF'\nx\nEOF", { session_id: 's-t' }), env);
+  assert.equal(home.stdout.trim(), '');
+  const dollar = runHook('pre-tool.mjs', bash(dir, "cat > $OUT/lib/x.ts <<'EOF'\nx\nEOF", { session_id: 's-t' }), env);
+  assert.equal(dollar.stdout.trim(), '');
+  const rules = JSON.parse(fs.readFileSync(env.ROUTER_RULES, 'utf8'));
+  rules.rules.find((x) => x.id === 'reuse-scout-new-file').message = '';
+  rules.rules.find((x) => x.id === 'verify-commit-gate').message = '';
+  const file = path.join(root, 'rules.json'); fs.writeFileSync(file, JSON.stringify(rules));
+  const quiet = runHook('pre-tool.mjs', write(dir, path.join(dir, 'web/components/Quiet.tsx'), { session_id: 's-q' }), { ...env, ROUTER_RULES: file });
+  assert.equal(quiet.stdout.trim(), '');
+  // A blocking rule with no message must still deny with a readable reason, never an empty string.
+  const blank = runHook('pre-tool.mjs', bash(dir, 'git commit -m "x"'), { ...env, ROUTER_RULES: file });
+  assert.equal(blank.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(blank.json.hookSpecificOutput.permissionDecisionReason, 'verify gate: marker missing');
 });

@@ -13,7 +13,9 @@ failOpen(async () => {
   const input = await readStdin();
   if (!input || (input.hook_event_name && input.hook_event_name !== 'PreToolUse')) return;
   const { tool_name, tool_input } = input;
-  const loaded = loadRules();
+  // A broken/missing rules file must stay fail-open, but not silently: leave a trace.
+  let loaded;
+  try { loaded = loadRules(); } catch (e) { log('rules', '-', null, 'rules-load-failed', e.message); return; }
 
   let targets = [];
   if (tool_name === 'Bash') {
