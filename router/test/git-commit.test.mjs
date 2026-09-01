@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeRepo, tmpDir, runHook, testEnv } from './helpers.mjs';
 import { fingerprint, markerPath, readMarker, writeMarker, clearMarker, stagedPaths, changedPaths, toplevel } from '../lib/git.mjs';
-import { parseCommand, bashWriteTargets, candidateSet } from '../lib/commit.mjs';
+import { parseCommand, bashWriteTargets, bashWriteTargetsWithBase, candidateSet } from '../lib/commit.mjs';
 
 test('parseCommand: plain, chained add, env override, -C, amend, non-commit, quoted echo', () => {
   assert.equal(parseCommand('git commit -m "x"').isCommit, true);
@@ -213,4 +213,44 @@ test('fingerprint: new files are stamped by size+mtime, tracked files by content
   assert.notEqual(f2, f1);
   fs.writeFileSync(path.join(dir, 'a.txt'), 'bbbbb');
   assert.notEqual(fingerprint(dir), f2);
+});
+
+test('parseCommand: subshell parens, -C composed with cd, pathspec-from-file, heredoc bodies', () => {
+  const sub = parseCommand('(cd /tmp/x && git commit -am "m")');
+  assert.equal(sub.isCommit, true);
+  assert.equal(sub.commit.base, '/tmp/x');
+  assert.equal(sub.commit.all, true);
+  assert.deepEqual(parseCommand('(cd /tmp/x && git commit -m "m" app/page.tsx)').commit.paths, ['app/page.tsx']);
+  assert.deepEqual(parseCommand('cd "/tmp/my repo" && git commit -m x').commit.base, '/tmp/my repo');
+  // `git -C` is relative to the shell's cwd, so a preceding `cd` composes with it.
+  assert.equal(parseCommand('cd /tmp/x && git -C . commit -m m').commit.base, '/tmp/x');
+  assert.equal(parseCommand('cd /tmp/x/web && git -C .. commit -m m').commit.base, '/tmp/x');
+  assert.equal(parseCommand('cd /tmp/x && git -C /other add a.ts && git commit -m m').adds[0].base, '/other');
+  assert.equal(parseCommand('cd web && git -C lib add a.ts && git commit -m m').adds[0].base, path.join('web', 'lib'));
+  // A file of pathspecs the hook cannot read: unknown, never an empty (silently allowed) set.
+  assert.equal(parseCommand('git commit --pathspec-from-file=paths.txt -m m').commit.unknown, true);
+  assert.equal(parseCommand('git add --pathspec-from-file paths.txt && git commit -m m').adds[0].unknown, true);
+  // A commit inside a heredoc body is documentation, not a command.
+  const doc = parseCommand('cat > web/app/note.md <<EOF\nRun this to ship:\ngit commit -m "example"\nEOF');
+  assert.equal(doc.isCommit, false);
+  const many = parseCommand('cat > a.md <<A\ngit commit -m x\nA\ncat > b.md <<B\ngit commit -m y\nB\ngit commit -m real');
+  assert.equal(many.isCommit, true);
+  assert.deepEqual(many.commit.paths, []);
+});
+
+test('parseCommand: an unquoted heredoc body cannot grant SKIP_VERIFY', () => {
+  const doc = parseCommand('cat > notes.md <<EOF\nSKIP_VERIFY=1 git commit -m x\nEOF\ngit commit -m y');
+  assert.equal(doc.skip, false);
+  assert.equal(doc.isCommit, true);
+  const dash = parseCommand('cat > notes.md <<-EOF\n\tSKIP_VERIFY=1 git commit -m x\n\tEOF\ngit commit -m y');
+  assert.equal(dash.skip, false);
+  assert.equal(dash.isCommit, true);
+});
+
+test('bashWriteTargetsWithBase: each target carries the cd it was written under', () => {
+  assert.deepEqual(bashWriteTargetsWithBase('cd /tmp/scratch && cat > web/app/x.tsx <<EOF\nx\nEOF'), [{ target: 'web/app/x.tsx', base: '/tmp/scratch' }]);
+  assert.deepEqual(bashWriteTargetsWithBase('printf x >> notes.md'), [{ target: 'notes.md', base: null }]);
+  assert.deepEqual(bashWriteTargetsWithBase('cd web && npm test | tee out.log'), [{ target: 'out.log', base: 'web' }]);
+  assert.deepEqual(bashWriteTargetsWithBase('echo hi > /dev/null'), []);
+  assert.deepEqual(bashWriteTargets('cd /tmp/scratch && cat > web/app/x.tsx <<EOF\nx\nEOF'), ['web/app/x.tsx']);
 });

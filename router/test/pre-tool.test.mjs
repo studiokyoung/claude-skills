@@ -227,3 +227,15 @@ test('a worktree is identified by its main repo, so a commit inside it is gated'
   const r = runHook('pre-tool.mjs', bash(wt, 'git commit web/app/page.tsx -m "x"'), env);
   assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('a subshell and a -C composed with cd are gated by the repo they target', () => {
+  const { env } = testEnv();
+  const { dir } = dirty('portfolio-html');
+  const other = makeRepo('Self-GraphDB');
+  const sub = runHook('pre-tool.mjs', bash(other.dir, `(cd ${dir} && git commit -am "x")`), env);
+  assert.equal(sub.json && sub.json.hookSpecificOutput.permissionDecision, 'deny');
+  const here = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir} && git -C . commit web/app/page.tsx -m "x"`), env);
+  assert.equal(here.json && here.json.hookSpecificOutput.permissionDecision, 'deny');
+  const up = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir}/web && git -C .. commit web/app/page.tsx -m "x"`), env);
+  assert.equal(up.json && up.json.hookSpecificOutput.permissionDecision, 'deny');
+});
