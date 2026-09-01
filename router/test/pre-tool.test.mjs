@@ -202,3 +202,13 @@ test('tilde cd from another repo gates an unstaged pathspec commit too', () => {
   const ctrl = runHook('pre-tool.mjs', bash(other.dir, `cd ${dir} && git commit web/app/page.tsx -m "x"`), env);
   assert.equal(ctrl.json && ctrl.json.hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('a cd to a non-repo (or failing cd) still gates pathspec commits in the hook repo', () => {
+  const { env } = testEnv();
+  const { dir } = makeRepo('portfolio-html', { 'web/app/page.tsx': 'a' });
+  fs.writeFileSync(path.join(dir, 'web/app/page.tsx'), 'a2');
+  for (const cmd of ['cd ~/nowhere; git commit web/app/page.tsx -m "x"', 'cd $NOWHERE; git commit web/app/page.tsx -m "x"', 'cd ~/nowhere && git add web/app/page.tsx && git commit -m "x"']) {
+    const r = runHook('pre-tool.mjs', bash(dir, cmd), env);
+    assert.equal(r.json && r.json.hookSpecificOutput.permissionDecision, 'deny', cmd);
+  }
+});

@@ -29,18 +29,20 @@ export function decideCommit(loaded, input, parsed) {
   const cwd = realCwd(input.cwd);
   // The repo is the one the command itself targets (`git -C x`, or a preceding `cd x`) — not the
   // hook's cwd, which `cd repo && git commit` would otherwise let the gate read from the wrong repo.
-  const eb = expandHome(c.base || c.cPath || '.');
-  const base = path.resolve(cwd, eb);
-  // …but a base we cannot resolve (an unexpanded $VAR, or `cd web && cd ..` since cd does not compose)
-  // must fall back to the hook's own repo. Reading it as "no repo" would silently allow the commit.
-  const top = toplevel(base) || toplevel(cwd);
+  // The expanded bases must flow down too: candidateSet re-resolves each pathspec against its own
+  // base, and a raw `~/repo` there sends every path outside the repo — an empty, silently allowed set.
+  let eb = expandHome(c.base || c.cPath || '.');
+  let top = toplevel(path.resolve(cwd, eb));
+  let adds = (parsed.adds || []).map((a) => ({ ...a, base: expandHome(a.base || '.') }));
+  // …but a base we cannot resolve (an unexpanded $VAR, a `cd` to a non-repo, or `cd web && cd ..`
+  // since cd does not compose) must fall back to the hook's own repo. Reading it as "no repo" would
+  // silently allow the commit. git then runs in the hook's cwd, so the pathspecs resolve there too:
+  // keeping the outside base would push every path clear of `top` and empty the set into a silent allow.
+  if (!top) { top = toplevel(cwd); eb = '.'; adds = adds.map((a) => ({ ...a, base: '.' })); }
   const repo = top ? path.basename(top) : null;
   const rule = rulesFor(loaded, 'pre-commit', repo).find((r) => r.mode === 'block');
   if (!rule) return { decision: 'allow', why: 'out-of-scope', ruleId: '-', repo };
   if (parsed.skip) return { decision: 'allow', why: 'override SKIP_VERIFY', ruleId: rule.id, repo };
-  // The expanded bases must flow down too: candidateSet re-resolves each pathspec against its own
-  // base, and a raw `~/repo` there sends every path outside the repo — an empty, silently allowed set.
-  const adds = (parsed.adds || []).map((a) => ({ ...a, base: expandHome(a.base || '.') }));
   // null = a git listing failed. "Could not tell" is not "nothing to commit": skip both shortcuts
   // and let the marker decide.
   const cand = candidateSet(top, { ...c, base: eb }, adds, cwd);
