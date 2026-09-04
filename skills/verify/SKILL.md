@@ -303,6 +303,9 @@ do not soften it:
 - Does every ⏭️SKIP name a concrete reason (no tsconfig, no web UI, no-serve)?
 - Are the screenshots real **viewport tiles** at the three sizes (the JSON
   `viewports` line confirms 390/768/1440), not one long full-page image?
+- If you passed an anchor, does a tile per viewport actually show the changed
+  region, or is it sitting in `anchors_missed`? A missed anchor means the tile
+  you counted on does not exist, and the row's detail must say so.
 - On a mobile app: did maestro actually drive the chosen flows on a booted
   device (flow names + device in the detail), with missing preconditions
   reported as ⏭️/❌ and their reasons — never a ✅ from assumption?
