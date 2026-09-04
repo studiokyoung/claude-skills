@@ -4,7 +4,7 @@ description: Runs Kyoung's full pre-commit / pre-handoff verification gate in on
 user-invocable: true
 argument-hint: "[routes or flows, e.g. / /work/x] [no-serve]"
 metadata:
-  version: "1.2.1"
+  version: "1.2.2"
 allowed-tools:
   - Bash(git status:*)
   - Bash(git log:*)
@@ -124,10 +124,18 @@ project's own playwright + dev server.
    `git status --short` to their routes when you can; otherwise default to `/`.
    Routes given in the arguments override this. Pass them space- or
    comma-separated.
-3. Run the capture (it prints one JSON object as its last stdout line):
+3. Pin an anchor when the change is localized. A section or component that was
+   added or edited sits wherever it sits, and on a long page the fixed
+   top/mid/bottom fractions can land nowhere near it (the miss this step exists
+   for). Pass the changed heading's text, or a CSS selector for it, as
+   `--anchor` so at least one tile per viewport shows the changed region; repeat
+   the flag for a second changed region. A layout-wide or whole-page change
+   needs no anchor.
+4. Run the capture (it prints one JSON object as its last stdout line):
    ```
    node <skill dir>/references/shoot.mjs \
-     --root <projectRoot> --out <tempDir> --routes /,/work/x --port 3000
+     --root <projectRoot> --out <tempDir> --routes /,/work/x --port 3000 \
+     --anchor "Pricing tiers"
    ```
    - If a dev server is already running it is reused and left alone; if not, the
      script starts the project's dev server, waits, captures, then kills only
@@ -135,13 +143,22 @@ project's own playwright + dev server.
      forbid starting one — then it is ⏭️SKIP "no server, no-serve" if nothing is
      up. Pass `--start "<cmd>"` / `--port <n>` / `--base <url>` to override.
    - The script emits up to three tiles per viewport per route (top, plus
-     mid/bottom when the page is tall) so below-the-fold is its own tile.
-4. Parse the JSON: `count` tiles written, `tiles[].path`, and any `problems`
+     mid/bottom when the page is tall) so below-the-fold is its own tile, plus
+     one more tile for each `--anchor`.
+   - `--anchor` matches as a CSS selector first, then as text against the page's
+     headings; the first match is scrolled to the center of the viewport and
+     gets its own tile, `<vp>-<route>-anchor<N>.png`. An anchor that matches
+     nothing on a route is reported, never fatal.
+5. Parse the JSON: `count` tiles written, `tiles[].path`, and any `problems`
    (page errors / failed loads). This gate is ✅ = **tiles captured** (it does
    NOT mean they look right — a human still eyeballs them). Report every path so
    Kyoung can open them, and surface `problems` loudly. `"reason"` fields mean
    a skip/fail: `playwright-missing` → ⏭️SKIP "no playwright in project";
    `server-not-ready` / `server-down-no-serve` → ❌FAIL or ⏭️SKIP with the reason.
+   With anchors, `anchors` echoes what you passed and `anchors_missed` names
+   each one that matched nothing, with its route and viewport: not a crash, but
+   the tile you were counting on does not exist, so fix the anchor and rerun
+   rather than let the row read as full coverage.
 
 ### Maestro flows — when the repo is a mobile app with `.maestro/` flows
 

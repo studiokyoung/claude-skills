@@ -17,7 +17,7 @@ const at = (text, needle) => {
 };
 
 test('every published skill carries metadata.version', () => {
-  assert.equal(readSkillVersion('verify'), '1.2.1');
+  assert.equal(readSkillVersion('verify'), '1.2.2');
   assert.equal(readSkillVersion('reuse-scout'), '1.1.0');
   assert.equal(readSkillVersion('explain-diff'), '2.2.0');
   assert.equal(readSkillVersion('skill-router'), '1.1.0');

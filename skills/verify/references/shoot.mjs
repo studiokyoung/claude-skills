@@ -10,6 +10,14 @@
 //   node shoot.mjs --root <projectRoot> --out <dir> [--routes /,/work/x]
 //                  [--base http://localhost:3000] [--port 3000]
 //                  [--start "yarn dev"] [--no-serve] [--wait 90]
+//                  [--anchor "<text-or-css>"]   (repeatable)
+//
+// --anchor pins a tile to the region that actually changed, instead of trusting
+// the fixed top/mid/bottom fractions to land on it (on a long page they miss a
+// localized edit entirely). Each anchor is tried as a CSS selector first, then
+// as text matched against the page's headings; the first match is scrolled to
+// the center of the viewport and gets its own tile. An anchor that matches
+// nothing on a route is reported, never fatal.
 //
 // Resolves playwright from <projectRoot>'s node_modules first (falls back to the
 // script's own). If nothing is serving <base> and serving is allowed, it starts
@@ -17,7 +25,8 @@
 // (a server already running is reused and left alone).
 //
 // Prints one JSON object as the last stdout line:
-//   {"ok":bool,"served":bool,"base":str,"outDir":str,"count":n,"tiles":[...]}
+//   {"ok":bool,"served":bool,"base":str,"outDir":str,"count":n,"tiles":[...],
+//    "anchors":[...],"anchors_missed":[{"label","route","anchor"}]}
 // Exit codes: 0 ok · 2 playwright missing · 3 server not ready · 4 no tiles.
 
 import { createRequire } from 'node:module'
@@ -37,6 +46,14 @@ function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`)
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : def
 }
+// every occurrence, so a repeatable flag collects instead of keeping only the first
+function argAll(name) {
+  const out = []
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === `--${name}` && process.argv[i + 1]) out.push(process.argv[i + 1])
+  }
+  return out
+}
 function flag(name) {
   return process.argv.includes(`--${name}`)
 }
@@ -51,6 +68,7 @@ const port = arg('port', '3000')
 const base = arg('base', `http://localhost:${port}`).replace(/\/$/, '')
 const waitSec = parseInt(arg('wait', '90'), 10)
 const canServe = !flag('no-serve')
+const anchors = argAll('anchor')
 
 function emit(obj) {
   console.log(JSON.stringify(obj))
@@ -153,10 +171,37 @@ function routeName(r) {
   return n || 'home'
 }
 
+// Scroll the first element matching one anchor into the center of the viewport.
+// CSS selector first (an invalid one just misses, it never throws), then a
+// case-insensitive text match against the page's headings.
+async function scrollToAnchor(page, spec) {
+  return await page.evaluate((s) => {
+    let el = null
+    try {
+      el = document.querySelector(s)
+    } catch {
+      el = null
+    }
+    if (!el) {
+      const needle = s.trim().toLowerCase()
+      for (const h of document.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+        if ((h.textContent || '').trim().toLowerCase().includes(needle)) {
+          el = h
+          break
+        }
+      }
+    }
+    if (!el) return false
+    el.scrollIntoView({ block: 'center', inline: 'nearest' })
+    return true
+  }, spec)
+}
+
 await mkdir(outDir, { recursive: true })
 const browser = await chromium.launch()
 const tiles = []
 const problems = []
+const anchorsMissed = []
 
 for (const [label, w, h] of VIEWPORTS) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 })
@@ -197,6 +242,25 @@ for (const [label, w, h] of VIEWPORTS) {
         await page.screenshot({ path: file }) // viewport tile — NOT fullPage
         tiles.push({ label, viewport: `${w}x${h}`, route, pos, path: file })
       }
+      // one extra tile per anchor, pinned to the changed region so a localized
+      // edit is seen even when the fixed fractions land nowhere near it. A miss
+      // is recorded and the route carries on.
+      for (let i = 0; i < anchors.length; i++) {
+        const spec = anchors[i]
+        try {
+          if (!(await scrollToAnchor(page, spec))) {
+            anchorsMissed.push({ label, route, anchor: spec })
+            continue
+          }
+          await page.waitForTimeout(400)
+          const pos = `anchor${i + 1}`
+          const file = path.join(outDir, `${label}-${routeName(route)}-${pos}.png`)
+          await page.screenshot({ path: file }) // viewport tile, NOT fullPage
+          tiles.push({ label, viewport: `${w}x${h}`, route, pos, anchor: spec, path: file })
+        } catch (e) {
+          anchorsMissed.push({ label, route, anchor: spec, error: e.message })
+        }
+      }
     } catch (e) {
       loadErr = e.message
     }
@@ -222,6 +286,8 @@ emit({
   count: tiles.length,
   routes,
   viewports: VIEWPORTS.map(([l, w, h]) => `${l} ${w}x${h}`),
+  anchors,
+  anchors_missed: anchorsMissed,
   tiles,
   problems,
 })
