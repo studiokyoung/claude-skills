@@ -1,10 +1,10 @@
 ---
 name: verify
-description: Runs Kyoung's full pre-commit / pre-handoff verification gate in one command and prints an honest PASS/FAIL table. Use before committing, before handing work off, or when he says "verify", "check it", "is this safe to ship", "run the gate", and right after a change lands. Detects the stack and runs each applicable gate — git state, TypeScript typecheck, jest/vitest tests, and MULTI-VIEWPORT screenshots (mobile 390, tablet 768, desktop 1440 as viewport tiles, never a full-page shot) so below-the-fold and mobile-only breakage can't slip through. On a mobile app (Expo/React Native), the UI gate is the repo's MAESTRO flows on a booted simulator/device instead of browser screenshots. Skips a gate only with a stated reason and never reports "verified" when a step did not actually run. Not a diff-quality review (use /explain-diff) or a correctness bug hunt (use /code-review).
+description: Runs Kyoung's full pre-commit / pre-handoff verification gate in one command and prints an honest PASS/FAIL table. Use before committing, before handing work off, or when he says "verify", "check it", "is this safe to ship", "run the gate", and right after a change lands. Detects the stack and runs each applicable gate — git state, TypeScript typecheck, jest/vitest tests, a SECURITY scan (secrets in the added lines, tracked .env files, production dependency audit), and MULTI-VIEWPORT screenshots (mobile 390, tablet 768, desktop 1440 as viewport tiles, never a full-page shot) so below-the-fold and mobile-only breakage can't slip through. On a mobile app (Expo/React Native), the UI gate is the repo's MAESTRO flows on a booted simulator/device instead of browser screenshots. Skips a gate only with a stated reason and never reports "verified" when a step did not actually run. Not a diff-quality review (use /explain-diff) or a correctness bug hunt (use /code-review).
 user-invocable: true
 argument-hint: "[routes or flows, e.g. / /work/x] [no-serve]"
 metadata:
-  version: "1.2.2"
+  version: "1.4.0"
 allowed-tools:
   - Bash(git status:*)
   - Bash(git log:*)
@@ -36,10 +36,10 @@ allowed-tools:
 # verification gate (verify)
 
 Kyoung's pre-commit / pre-handoff ritual, run as one keystroke and non-optional.
-The ritual (git state → typecheck → tests → multi-viewport screenshots) works
-every time it is actually done; it fails only when a step gets skipped. This
-skill runs every applicable step and prints one PASS/FAIL table so the decision
-to commit or hand off takes a single read.
+The ritual (git state → security → typecheck → tests → multi-viewport
+screenshots) works every time it is actually done; it fails only when a step
+gets skipped. This skill runs every applicable step and prints one PASS/FAIL
+table so the decision to commit or hand off takes a single read.
 
 **The prime directive: honesty over green.** Never print ✅PASS, or say
 "verified", for a step whose command did not actually run and come back clean.
@@ -73,6 +73,10 @@ From the repo root, establish what applies. Cheap checks, no guessing:
   **maestro**: a `.maestro/` (or `maestro/`) directory with flows means the
   maestro gate applies. An app with no flows gets ⏭️SKIP "no maestro flows" on
   that row — and say loudly that the app shipped with no UI gate at all.
+- **Security:** no signal to detect — this gate always applies, and it runs
+  first after git state because it is cheap and its failure is the one that
+  cannot be undone later. It finds the packages to audit itself; nothing to
+  detect here.
 
 A gate whose signal is absent is ⏭️SKIP with that reason (e.g. "no tsconfig",
 "no web UI") — not a failure. A gate whose signal is present **must run**.
@@ -90,6 +94,88 @@ git log --oneline -3
 Report what is uncommitted (or "clean") and the recent history. This gate is
 informational: it is ✅ when it ran. Note loudly if the tree is **clean** but
 you were asked to verify a change — there may be nothing staged to verify.
+
+### Security — always
+
+A `.gitignore` entry is not a gate. It is silent, it only covers the names
+someone remembered, and it says nothing about what is **already tracked** or
+about the lines sitting in the index right now. This gate reads those lines
+instead, and it runs on every stack — no repo is exempt from leaking a
+credential because it has no web UI.
+
+It runs **second, right after git state, before typecheck** — it is the cheapest
+gate, and it is the only one whose failure cannot be fixed after the fact. A
+broken build is amended; a pushed credential has to be rotated everywhere it was
+trusted. Finding it before the slow gates run is the whole point.
+
+```
+node <skill dir>/references/security-scan.mjs --root "$(git rev-parse --show-toplevel)"
+```
+
+It prints one JSON object as its last stdout line, covering three things:
+
+- `secrets[]` — provider-shaped tokens (cloud access keys, webhook URLs, PEM
+  private-key headers, service-account JSON) plus the generic `secret: "…"`
+  shape, found in the **added** lines of the working tree and the index, and in
+  untracked, non-ignored files. Each is `{file, line, pattern, masked}`, where
+  `masked` is the first four characters plus the length. **Report the masked
+  form only.** Never print the raw line to "confirm" a hit — a gate that echoes
+  a credential into the transcript has leaked it a second time.
+- `envTracked[]` — env files that are actually **tracked**, which is precisely
+  the blind spot of a gitignore-only guard. The `.env.example` / `.sample` /
+  `.template` family is excluded; those are meant to be committed.
+- `audit` — a production-only dependency audit (`npm audit --omit=dev`,
+  `pnpm audit --prod`, or `yarn audit --groups dependencies` for yarn v1), 90s
+  per package, run **per package rather than per repo**.
+  The git toplevel is frequently not the npm project root, so: the scan root when
+  it owns a lockfile, otherwise every tracked package in the repo, up to thirty.
+  `{status, high, critical, packages[], reason?}` — `high`/`critical` are the sum
+  over the packages that actually completed, and `packages[]` carries each one as
+  `{dir, status, high, critical, reason?}`.
+
+Row status:
+
+- ✅PASS = the scan ran and `verdict` is `PASS`.
+- ❌FAIL = `verdict` is `FAIL` — one or more secrets, one or more tracked env
+  files, or `high + critical ≥ 1` from the audit. Say which of the three tripped.
+- `audit.status` is `ok` (every package audited), `partial` (at least one package
+  was not — offline, timed out, over the cap, or a yarn berry/missing-binary case
+  the v1 parser cannot read) or `skip` (nothing to audit at all). None of the
+  three skips the row: the secret and env checks still ran, so the row stays ✅/❌
+  on `verdict`, and the audit's `reason` goes in the detail cell as given.
+- The scan cannot run at all outside a git repo. That prints
+  `{"verdict":"FAIL","reason":"not-a-git-repo"}` and exits 2 — the row is ❌ with
+  that reason, never ⏭️: "we could not look" is not "nothing to find".
+- **Name the packages in the detail cell**, never just a total — a repo-wide
+  number tells nobody which site to patch:
+  `audit: 3 pkgs · high 4 (apps/web) · critical 1 (apps/web) · 2 over cap`.
+  On `partial`, say plainly which packages were **not** covered; a sum over a
+  subset is not a clean bill of health for the rest.
+
+`scanned` says how much the secret pass actually read: `{files, lines}`. **When
+`scanned.lines` is 0 the gate found nothing because there was nothing to look
+at** — a clean tree with no staged diff and no untracked files gives an empty
+scan, and an empty scan is not evidence of a clean change. Put `scanned 0 lines`
+in the detail cell verbatim when that happens, so the ✅ is read as "nothing to
+check here" rather than "checked and clean". A `--root` pointed below the git
+toplevel narrows the scan to that subtree, which is another way the number
+legitimately goes to 0.
+
+Two traps worth naming, because both read as green:
+
+- **`partial` is not `ok`.** The packages that did not run contribute 0 to the
+  total, so an unread package and a clean package look identical in the number.
+  Only `packages[]` tells them apart. If the change touched a package that sits
+  in `reason` rather than in `packages[]`, rerun with `--root <that package dir>`
+  before you call the row done.
+- **A finding is not automatically a leak, and a clean scan is not proof of
+  none.** An intentional sample — a fixture, a docs snippet — is excused by
+  putting a `verify:allow-secret` comment on that line: a deliberate, greppable
+  decision. Never widen or delete a pattern to get the row green.
+
+Everything this gate catches goes into `caught` in §4's record **masked**, and
+the `gates` map carries it as `"security"`. Use `--no-audit` only when the
+registry is known-unreachable, and say so in the detail cell.
 
 ### Typecheck — when TypeScript is present
 Prefer the project's script; fall back to the compiler:
@@ -211,6 +297,27 @@ or `expo` in deps AND a `.maestro/` directory — both present means this gate
    what the app's own dev tooling stages. Everything maestro caught goes into
    `caught` in §4's record, and the `gates` map carries it as `"maestro"`.
 
+### Second-family review — optional lane, when a review skill for another model is installed
+
+The deterministic gates say whether the tree compiles, tests and drives; they do not say
+whether the change is *right*. When a second-model review skill is available in this
+environment (Kyoung's `astra` skill — GPT-6 through the Codex CLI — is the current one) and
+its own preflight passes, hand it the change AFTER the gates above, not instead of them:
+a review brief (the diff against the stated intent, verified by running the same typecheck
+and test commands), or — for a gate that FAILED with a long log — the log itself for a
+first-failing-step reading. Read back only its digest and findings table; the point of the
+lane is that the main session does not re-read the diff or the log. Add an `astra` row:
+
+- ✅PASS = it ran and reported no blocker (nits go in the detail cell);
+- ❌FAIL = a blocker it reported **and you re-verified** — a second model's claim is a
+  lead, never a verdict on its own;
+- ⏭️SKIP = skill absent, its preflight failed, or quota — with the reason. The correctness
+  review then falls back to the main session, and the detail cell says so.
+
+The row never turns a red gate green, and a ⏭️ here does not by itself make the verdict
+"not safe" — the deterministic gates decide that; this row records whether a correctness
+review happened and by whom.
+
 ## 3. The PASS/FAIL table
 
 One row per gate. Lead with a loud banner **only when** something applicable
@@ -224,6 +331,7 @@ screenshot paths.
 | gate | status | detail |
 |------|--------|--------|
 | git state | ✅PASS | 3 files uncommitted · last: `a163b5f T35 …` |
+| security | ✅PASS | secrets 0 · .env tracked 0 · audit 1 pkg · high 0 · critical 0 |
 | typecheck | ✅PASS | `tsc --noEmit` clean |
 | tests | ❌FAIL | 1 suite failed: `carousel.test.ts` |
 | screenshots | ✅PASS | 9 tiles (3 vp × home,work) → /tmp/verify-… · eyeball them |
@@ -240,6 +348,10 @@ Rules:
   why in the detail cell.
 - The screenshots row is ✅ when tiles were written; its detail says the human
   must look. Never phrase it as "looks correct" — the skill did not judge that.
+- The security row is ❌ on any secret, any tracked env file, or a high/critical
+  audit count, and a ❌ there makes the verdict "not safe" like any other gate —
+  a credential in the diff is not a nit to fix in the next commit. Its detail
+  carries masked findings only, never a raw value.
 - On a mobile app the screenshots row is replaced by a `maestro` row (flows
   run · device); the same ✅-only-on-exit-0 rule applies, and a skipped
   precondition is ⏭️ with its reason, never a silent pass.
@@ -256,7 +368,7 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
    should-run gate ⏭️SKIP):
    ```
    node <skill dir>/references/mark-pass.mjs --root <projectRoot> \
-     --gates '{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' \
+     --gates '{"git":"PASS","security":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"}' \
      --routes '["/","/work/x"]'
    ```
    `--routes` here is a JSON array (`'["/","/work/x"]'`), not the comma list `shoot.mjs`
@@ -272,19 +384,21 @@ ledger see; skipping them is the same failure as printing a ✅ you did not earn
 2. **Run record — always, safe or not:**
    ```
    node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
-     '{"verdict":"safe","gates":{"git":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":84,"caught":[]}'
+     '{"verdict":"safe","gates":{"git":"PASS","security":"PASS","typecheck":"PASS","tests":"PASS","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":84,"caught":[]}'
    ```
    The same command when a gate failed — the verdict flips with it:
    ```
    node <skill dir>/references/record-run.mjs --skill verify --cwd <projectRoot> --json \
-     '{"verdict":"not-safe","gates":{"git":"PASS","typecheck":"PASS","tests":"FAIL","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":61,"caught":["tests: carousel.test.ts failed"]}'
+     '{"verdict":"not-safe","gates":{"git":"PASS","security":"FAIL","typecheck":"PASS","tests":"FAIL","screenshots":"PASS"},"tiles":9,"routes":["/","/work/x"],"duration_s":61,"caught":["tests: carousel.test.ts failed","security: aws-access-key in src/api.ts:12 (AKIA…(20))"]}'
    ```
    Use the table's real values. `verdict` follows §3's rule exactly: `safe` only when
    every applicable gate is ✅PASS and no should-run gate was ⏭️SKIP — anything else is
    `not-safe`. `gates` values are `PASS` / `FAIL` / `SKIP`, and the map carries every gate the
-   stack actually ran (a mobile app adds `"maestro"`); `caught` lists what the gate
-   actually stopped (a failing suite, a typecheck error, a page error in the tiles) and
-   is `[]` when everything passed. The record is one appended line in
+   stack actually ran — `"security"` is in every run, since that gate always applies; a
+   mobile app adds `"maestro"`; the second-family lane, when it ran or
+   was skipped, adds `"astra"`. `caught` lists what the gate
+   actually stopped (a failing suite, a typecheck error, a page error in the tiles, a
+   masked secret) and is `[]` when everything passed. The record is one appended line in
    `$SKILL_RUNS_DIR/verify.jsonl` (default `~/.claude/skill-runs/`); it never touches
    the repo.
 
@@ -301,6 +415,16 @@ do not soften it:
 - Is every ✅PASS backed by a command that returned exit 0 (or, for screenshots,
   tiles that exist on disk)? No ✅ from assumption.
 - Does every ⏭️SKIP name a concrete reason (no tsconfig, no web UI, no-serve)?
+- Did the security scan actually run (second, before typecheck), and does the row
+  read off its `verdict`? On `partial` or `skip`, does the detail cell carry the
+  reason — and does it **name the packages** that were audited and the ones that
+  were not, rather than showing a bare total that an un-run package is hiding
+  inside? If the change touched a package listed in `reason` instead of
+  `packages[]`, did you rerun with `--root` pointed at it?
+- Is every security finding reported **masked**, with no raw credential anywhere
+  in the table, the `caught` list, or the prose?
+- If `scanned.lines` is 0, does the detail cell say `scanned 0 lines` instead of
+  letting an empty scan read as a clean one?
 - Are the screenshots real **viewport tiles** at the three sizes (the JSON
   `viewports` line confirms 390/768/1440), not one long full-page image?
 - If you passed an anchor, does a tile per viewport actually show the changed
