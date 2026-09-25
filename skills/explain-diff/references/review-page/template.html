@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="@@LANG@@">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>@@PAGE_TITLE@@</title><style>@@CSS@@</style></head>
+<body>
+<a class="skip" href="#main">@@L_SKIP@@</a>
+<div class="shell">
+  <aside class="rail">
+    <a class="brand" href="#overview"><span class="mark">@@MARK@@</span>@@BRAND@@</a>
+    <p class="rail-label">@@RAIL_LABEL@@</p>
+    <nav id="review-nav" aria-label="@@L_NAV@@"></nav>
+    <div class="rail-bottom">@@RAIL_BOTTOM@@</div>
+  </aside>
+  <main id="main">
+    <header class="document-head"><span class="eyebrow">@@EYEBROW@@</span>@@HEAD_LINK@@</header>
+    <div class="mobile-select"><label for="section-select">@@L_NAV@@</label><select id="section-select"></select></div>
+    <div class="reading-guide">@@L_READING_GUIDE@@</div>
+    <section id="intro">@@INTRO@@</section>
+    <section id="overview-panel">@@OVERVIEW@@</section>
+    <section class="section" id="changes-section">
+      <div class="section-head"><span class="section-number">01</span><h2>@@L_CHANGES_NAV@@</h2></div>
+      <div class="change-search"><label for="change-search">@@L_SEARCH_LABEL@@</label><input id="change-search" type="search" placeholder="@@L_SEARCH_PLACEHOLDER@@" autocomplete="off"><span id="change-count" role="status"></span></div>
+      <p class="caption section-note">@@CHANGES_NOTE@@</p><div id="changes"></div>
+      <div id="no-changes" class="paper empty-note" hidden></div>
+    </section>
+    <section class="section" id="code-section">
+      <div class="section-head"><span class="section-number">02</span><h2>@@L_CODE_NAV@@</h2></div>
+      <div class="code-controls paper">
+        <div><span class="pill green">@@L_WHOLE_RANGE@@</span><p id="diff-basis" class="caption"></p></div>
+        <div class="code-actions"><a id="download-patch" download="@@PATCH_NAME@@">@@L_DOWNLOAD_PATCH@@</a>@@REMOTE_COMPARE@@</div>
+      </div>
+      <p class="version-note" id="version-note"></p>
+      <div class="diff-workspace">
+        <aside class="file-panel paper">
+          <div class="file-search"><label for="file-search">@@L_FILE_SEARCH_LABEL@@</label><input id="file-search" type="search" placeholder="@@L_FILE_SEARCH_PLACEHOLDER@@" autocomplete="off"><div class="file-filter"><label for="file-kind">@@L_KIND_LABEL@@</label><select id="file-kind">@@KIND_OPTIONS@@</select></div><p id="file-count" class="caption" role="status"></p></div>
+          <div id="file-list" role="group" aria-label="@@L_FILE_GROUP@@"></div><div id="file-empty" hidden><p>@@L_FILE_EMPTY@@</p><button id="reset-files" type="button">@@L_RESET_SEARCH@@</button></div>
+        </aside>
+        <div class="paper" id="diff-placeholder">@@DIFF_PLACEHOLDER@@</div><article class="diff-panel paper" id="diff-panel" hidden>
+          <div class="file-heading"><div><span id="file-category" class="eyebrow"></span><h3 id="file-name"></h3><span id="file-stat" class="caption"></span></div><label class="wrap-toggle"><input id="wrap-lines" type="checkbox" checked>@@L_WRAP@@</label></div>
+          <div class="file-explanation" id="file-explanation"></div><div class="source-links" id="source-links"></div><div id="code-body" class="diff-code wrap" role="region" aria-label="@@L_FILE_REGION@@" tabindex="0"></div>
+        </article>
+      </div>
+    </section>
+    @@PROSE@@
+    @@QUESTION@@
+    <footer>@@FOOTER@@</footer>
+  </main>
+</div>
+<noscript><p>@@L_NOSCRIPT@@</p></noscript>
+<script type="application/json" id="review-data">@@DATA@@</script><script>@@JS@@</script>
+</body></html>

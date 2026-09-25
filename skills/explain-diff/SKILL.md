@@ -1,10 +1,10 @@
 ---
 name: explain-diff
-description: Reviews an AI-written diff hunk by hunk before you approve it. Two axes in one table, why each change exists (evidence traced, never guessed) and whether it deserves to exist (✅ keep, ✂️ cut, 🔻 trim, ❓ ask). Use for requests like "review this diff before I approve it", "is this safe to accept?", "what did you just change, does it all belong?", and right after an AI finishes a change when the user has to decide whether to keep it. Default target is the uncommitted working tree; a ref or range in the arguments scopes it to that range. Exhaustive correctness-bug review belongs to /code-review, and style cleanup plus applying it belongs to /simplify; this skill judges whether a change earned its place and stops at the report. Pass html in the arguments, or ask for an html view or a file that reads nicely, and the same review renders as a local HTML file opened in the browser.
+description: Reviews an AI-written diff hunk by hunk before you approve it. Two axes in one table, why each change exists (evidence traced, never guessed) and whether it deserves to exist (✅ keep, ✂️ cut, 🔻 trim, ❓ ask). Use for requests like "review this diff before I approve it", "is this safe to accept?", "what did you just change, does it all belong?", and right after an AI finishes a change when the user has to decide whether to keep it. Default target is the uncommitted working tree; a ref or range in the arguments scopes it to that range. Exhaustive correctness-bug review belongs to /code-review, and style cleanup plus applying it belongs to /simplify; this skill judges whether a change earned its place and stops at the report. Pass html in the arguments, or ask for an html view or a file that reads nicely, and the same review renders as a local, self-contained review page opened in the browser: a rail of numbered sections, one before / after / meaning card per change with its verdict and evidence, searchable, and each file's real diff behind a button.
 user-invocable: true
 argument-hint: "[ref/range, e.g. HEAD, main..feature/x] [html for the browser view]"
 metadata:
-  version: "2.2.0"
+  version: "3.0.0"
 allowed-tools:
   - Bash(git diff:*)
   - Bash(git log:*)
@@ -15,6 +15,7 @@ allowed-tools:
   - Bash(git rev-parse:*)
   - Bash(git rev-list:*)
   - Bash(open:*)
+  - Bash(python3:*)
   - Read
   - Grep
   - Glob
@@ -185,74 +186,62 @@ Say "cut the ✂️ ones" or "just cut number 2" and it gets applied.
 ## 6. html mode (opt-in)
 
 When the arguments contain `html`, or the user asks for an html or file view,
-complete the same review as in §1 through §4, then render it as a **GitHub-style
-split diff** (left = before, right = after, changed lines highlighted). Every
-file gets a blue "what this means" box above its diff. The script does the
-rendering, the review does the writing.
+complete the same review as in §1 through §5, then render it as the **review
+page**: a left rail with numbered sections, an overview with stat cards,
+section 01 with one before / after / meaning card per logical change (verdict
+pill, evidence `path:line`, search box), section 02 with each file's real
+unified diff behind a file button, then your prose sections. The review does
+the writing; `references/review-page/build_review_page.py` does the rendering
+and reads the diff from git itself, so you never paste diff text into it.
 
-By default html mode also bakes a per-line **mechanic note** onto each changed
-line that carries one, revealed by a click (the calibration and the line-note
-rules are below). If the user asks for a light or quick html view (for example
-`html quick`, `html simple`, or `html 간단히`), skip `lineNotes` and render the
-lighter view without them.
-
-1. Write the config JSON to `<output path>.config.json`. The schema is defined
-   by the header comment of `references/gen-splitdiff.js`. The key fields:
-   `sections[]` (range groups, one per PR or per commit), `subtitle` (put the
-   verdict-count line from §5 here), `notes["<sectionId>:<file path>"]` (the
-   HTML explaining what that file's change means), and
-   `lineNotes["<sectionId>:<file path>:R<new line number>"]` (the per-line
-   mechanic notes, written per the calibration and rules below).
-2. **Rules for writing notes. Someone who did not sit through the session
-   reads this.** The shape of each note: (1) what changed and how (plain
-   language, only code identifiers in `<code>`), (2) why it changed (what the
-   evidence ladder in §3 dug up), (3) what was verified and what was not
-   (anything unverified, every non-keep verdict, and every open question comes
-   with ⚠️). Do not use abbreviations or nicknames coined in this session or
-   conversation. If the concept is needed, spell it out. Ticket numbers
-   (for example, ABC-123), commit shas, and real code names are written as they
-   are. Note
-   values are rendered as HTML, so a component name written with bare angle
-   brackets like `<Name>` gets swallowed as a tag and disappears: put it in
-   `<code>` or escape it as `&lt;`. The same goes for the other two characters
-   the parser owns, `>` and `&`, which become `&gt;` and `&amp;`. A JSX or HTML
-   excerpt pasted raw breaks the view.
-
-### Calibrating the line notes — write to THIS reader
-
-The person reading is a design engineer who directs AI to write code and reviews the result. Pitch every line note to that reader:
-
-- **Assume** they read code fluently and own the design, UX, and product judgment — they know what the code is *supposed* to do.
-- **Fill in** the framework and language *mechanics* they steer but do not hand-write: React/Next hook lifecycle and dependency arrays, why a memo / callback / effect is shaped this way, async and promise flow, TypeScript narrowing and generics, what an API or SDK call actually does on the wire, state and re-render consequences. The test is "would they have to stop and look this up to be sure what it does?" — if yes, that is the note.
-- **Skip** design, CSS, layout, and visual styling (their home turf — explaining it is noise), and beginner boilerplate ("this declares a variable", "this imports X"). A line whose only content is theirs to own, or is trivially obvious, gets no note.
-- **One mechanic per note.** Say what the line does and the one consequence that matters — what breaks or changes without it. Two to four lines, not a lecture.
-- Language follows the same rule as the rest of the skill (the language the user is prompting in).
-
-### Line notes — the click-to-expand mechanic layer
-
-In html mode, alongside the per-file `notes`, attach a **line note** to each changed line that carries a real mechanic per the calibration above. In the config:
-
-`"lineNotes": { "<sectionId>:<path>:R<newLineNumber>": "<html>", ... }`
-
-- The key side is `R` for a right-side (added or context) line, by its **new** line number — the common case. Use `L<oldLineNumber>` only for a removed line worth explaining on the left.
-- Only changed lines get a note, and only when the calibration says there is a mechanic to fill. Most `+` lines in a hunk qualify; the trivial ones do not. Unchanged context lines almost never get one.
-- If a section has more than ~40 changed lines, note the load-bearing ones and state "explained N of M changed lines" in that file's per-file note. Never silently drop — the same rule as everywhere else in this skill.
-- The value is HTML, same escaping rule as `notes`: `<`, `>`, `&` in code must be escaped or wrapped in `<code>`.
-- After running the script, check the `lineNotes: n/m matched` line the way you check `notes`; an unused key means a typo'd line number — fix it and re-run.
-
-3. Run `node <skill directory>/references/gen-splitdiff.js <config> <output path>`,
-   then **check the `notes: n/m matched` count the script prints.** If UNUSED
-   NOTE KEYS appears, a typo in a path silently dropped a note, so fix it and
-   re-run. If it is clean, `open <output path>`. The output path is
-   `/tmp/<YYYY-MM-DD>-explain-diff-<repo name>.html`, and if that name already
-   exists (check with Glob), add `-2`, `-3`, and so on before the extension,
-   like `<repo name>-2.html`. The script's output is offline and
+1. **Write the notes JSON** to `/tmp/<YYYY-MM-DD>-explain-diff-<repo name>.json`.
+   The schema, with a minimal example, is the header comment of
+   `references/review-page/build_review_page.py`; unknown fields are refused.
+   The key fields:
+   - `repo` (absolute path), `before` and `after` (the range from §1 is
+     `before..after`), `title`, `subtitle` (put the first line of §5 here in
+     prose), and `lang`: the language of the user's prompt, `"ko"` or `"en"`.
+     All prose follows that language.
+   - `changes[]`, one per table row of §5: `id`, `group` (the file or topic),
+     `title`, `verdict` (`keep` / `cut` / `trim` / `ask` from §4), `before`,
+     `after`, `why`, `files` (paths that must be in the diff), `evidence`
+     (`path:line` labels), and `followup: true` only for a change made after an
+     earlier review.
+   - `sections[]` for the rest of §5 in order, each `{ id, heading, markdown }`:
+     the detail of the non-keep rows, the questions, the suspected bugs, the
+     next action. They are numbered 03, 04, ... automatically.
+   - Optional: `glossary`, `question` (the closing callout, for one decision
+     left to the user), `remote_url` (the repository's web URL; with it,
+     `path:line` evidence and diff line numbers become links), `ticket`,
+     `brand`, `eyebrow`, `stats` (derived when absent).
+   - The worktree scope has no `after` commit. Review it as in §1, and for the
+     page pass the refs of the committed part of the scope only, or say in one
+     line that html mode needs a commit range.
+2. **Rules for writing the cards. Someone who did not sit through the session
+   reads this.**
+   - `before`: what happened before the change, in plain language. `after`:
+     what happens now. `why`: what it means and why it exists, traced through
+     the evidence ladder in §3 and naming its source. "No evidence found" is
+     written as it is.
+   - Every non-keep verdict, every open question, and anything not verified
+     carries ⚠️ in its `why`.
+   - Do not use abbreviations or nicknames coined in this session or
+     conversation. If the concept is needed, spell it out. Ticket numbers,
+     commit shas and real code names are written as they are.
+   - Identifiers, paths and code go in backticks. Everything is HTML-escaped by
+     the script, so `<Name>` is safe inside backticks and in plain text alike.
+3. **Build and open.** Run
+   `python3 <skill directory>/references/review-page/build_review_page.py <json> /tmp/<YYYY-MM-DD>-explain-diff-<repo name>.html`.
+   If that name already exists (check with Glob), add `-2`, `-3`, and so on
+   before the extension, like `<repo name>-2.html`, for both the JSON and the
+   HTML. Check the printed summary: the file count and change count must match
+   your table. A non-zero exit names the field, path or placeholder at fault;
+   fix the JSON and re-run. Then `open <output path>`. The page is offline and
    self-contained. Do not add external requests (CDN, fonts, remote images) to it.
 4. Keep this mode's terminal output to three lines: the first line of §5 (the
    range plus verdict counts), the path of the file you wrote, and the one-line
-   next action. The HTML carries the full text, including the per-line mechanic
-   notes html mode bakes onto each changed line that carries one. The file path
-   is in the HTML, so a follow-up like "why is this file like this?" still works.
+   next action. The page carries the full text. The file path is in the page,
+   so a follow-up like "why is this file like this?" still works.
 
 If `html` is absent, ignore this section entirely and write no file.
 
