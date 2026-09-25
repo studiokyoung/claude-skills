@@ -198,15 +198,19 @@ and reads the diff from git itself, so you never paste diff text into it.
    The schema, with a minimal example, is the header comment of
    `references/review-page/build_review_page.py`; unknown fields are refused.
    The key fields:
-   - `repo` (absolute path), `before` and `after` (the range from §1 is
-     `before..after`), `title`, `subtitle` (put the first line of §5 here in
-     prose), and `lang`: the language of the user's prompt, `"ko"` or `"en"`.
-     All prose follows that language.
+   - `repo` (absolute path), `before` and `after` from the scope in §1: with
+     no argument (the working tree), `before` is `HEAD` and `after` is
+     `"worktree"`, which covers staged, unstaged and untracked files; with a
+     range or a normalized single ref, both refs as given. Then `title`,
+     `subtitle` (put the first line of §5 here in prose), and `lang`: the
+     language of the user's prompt, `"ko"` or `"en"`. All prose follows that
+     language.
    - `changes[]`, one per table row of §5: `id`, `group` (the file or topic),
      `title`, `verdict` (`keep` / `cut` / `trim` / `ask` from §4), `before`,
      `after`, `why`, `files` (paths that must be in the diff), `evidence`
-     (`path:line` labels), and `followup: true` only for a change made after an
-     earlier review.
+     (`path:line` labels), optional `ref` (the commit its evidence lines were
+     read at, when that is not `after`), and `followup` only for a change made
+     after an earlier review: `true`, or the `id` of the earlier card it fixes.
    - `sections[]` for the rest of §5 in order, each `{ id, heading, markdown }`:
      the detail of the non-keep rows, the questions, the suspected bugs, the
      next action. They are numbered 03, 04, ... automatically.
@@ -214,9 +218,6 @@ and reads the diff from git itself, so you never paste diff text into it.
      left to the user), `remote_url` (the repository's web URL; with it,
      `path:line` evidence and diff line numbers become links), `ticket`,
      `brand`, `eyebrow`, `stats` (derived when absent).
-   - The worktree scope has no `after` commit. Review it as in §1, and for the
-     page pass the refs of the committed part of the scope only, or say in one
-     line that html mode needs a commit range.
 2. **Rules for writing the cards. Someone who did not sit through the session
    reads this.**
    - `before`: what happened before the change, in plain language. `after`:

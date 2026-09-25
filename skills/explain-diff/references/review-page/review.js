@@ -10,8 +10,9 @@
   window.explainDiffData = data; window.explainDiffState = state;
   // Source links exist only when the notes gave a remote_url; otherwise line numbers stay plain text.
   function sourceUrl(file, old=false, line=null) {
-    if(!data.remote_url)return null;
-    return `${data.remote_url}/blob/${old?data.before_sha:data.after_sha}/${file.path.split('/').map(encodeURIComponent).join('/')}${line?'#L'+line:''}`;
+    const sha=old?data.before_sha:data.after_sha;
+    if(!data.remote_url||!sha)return null;
+    return `${data.remote_url}/blob/${sha}/${file.path.split('/').map(encodeURIComponent).join('/')}${line?'#L'+line:''}`;
   }
   function nav() {
     $('review-nav').innerHTML=order.map(key=>`<button type="button" class="pr-link ${key===state.section?'active':''}" data-section="${key}" aria-pressed="${key===state.section}"><span class="letter">${sections[key].number||'↗'}</span><span><strong>${e(sections[key].nav)}</strong></span></button>`).join('');
@@ -28,7 +29,7 @@
       if(change.followup&&!followup){followup=true;group=null;head=`<h3 class="file-group followup-title">${e(L.followup_heading)}</h3>`;}
       if(group!==change.group){group=change.group;head+=`<h3 class="file-group"><code>${e(group)}</code></h3>`;}
       const tone={keep:'green',cut:'red',trim:'amber',ask:'amber'}[change.verdict];
-      return head+`<article class="paper change" id="change-${e(change.id)}"><div class="change-title"><span class="id">${e(change.id)}</span><h3>${e(change.title)}</h3><span class="pill ${tone}">${e(L.verdicts[change.verdict])}</span>${change.followup?`<span class="pill">${e(L.followup_tag)}</span>`:''}</div><div class="change-columns"><div><span class="label">${e(L.before)}</span><p>${change.before_html}</p></div><div class="after"><span class="label">${e(change.followup?L.after_followup:L.after)}</span><p>${change.after_html}</p></div></div><p class="why"><b>${e(L.meaning)} · </b>${change.why_html}</p><div class="file-links">${change.files.map(path=>`<button type="button" data-open-file="${e(path)}">${e(path)} ↗</button>`).join('')}</div>${change.evidence_html.length?`<div class="evidence-links">${change.evidence_html.join('')}</div><p class="caption evidence-basis">${e(t(L.evidence_basis,{ref:data.after}))}</p>`:''}</article>`;
+      return head+`<article class="paper change" id="change-${e(change.id)}"><div class="change-title"><span class="id">${e(change.id)}</span><h3>${e(change.title)}</h3><span class="pill ${tone}">${e(L.verdicts[change.verdict])}</span>${change.followup?`<span class="pill">${e(L.followup_tag)}</span>`:''}</div><div class="change-columns"><div><span class="label">${e(L.before)}</span><p>${change.before_html}</p></div><div class="after"><span class="label">${e(change.followup?L.after_followup:L.after)}</span><p>${change.after_html}</p></div></div><p class="why"><b>${e(L.meaning)} · </b>${change.why_html}</p>${typeof change.followup==='string'||change.fixed_by.length?`<div class="example"><b>${e(L.followup_tag)}</b>${typeof change.followup==='string'?`<button class="jump" data-change="${e(change.followup)}">${e(t(L.fixes,{id:change.followup}))}</button>`:''}${change.fixed_by.map(id=>`<button class="jump" data-change="${e(id)}">${e(t(L.fixed_by,{id}))}</button>`).join(' ')}</div>`:''}<div class="file-links">${change.files.map(path=>`<button type="button" data-open-file="${e(path)}">${e(path)} ↗</button>`).join('')}</div>${change.evidence_html.length?`<div class="evidence-links">${change.evidence_html.join('')}</div><p class="caption evidence-basis">${e(t(L.evidence_basis,{ref:change.ref}))}</p>`:''}</article>`;
     }).join('');
     $('no-changes').hidden=list.length>0;
     $('no-changes').innerHTML=`<p>${e(L.no_matches)}</p><button class="jump" data-reset-changes>${e(L.reset_search)}</button>`;

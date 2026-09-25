@@ -10,14 +10,16 @@ stat cards, section 01 = one before / after / meaning card per logical change
 diff per file behind file buttons, then numbered prose sections and an optional
 closing question. CSS, JS and data are inlined; nothing loads from the network.
 
-The script reads the diff itself (git diff / log / rev-parse / show only) for
-the range <before>..<after>; the caller never supplies diff data.
+The script reads the diff itself (git diff / log / rev-parse / show / ls-files
+only) for <before>..<after>, or <before> against the working tree; the caller
+never supplies diff data.
 
 Input JSON (unknown fields are an error):
 
     repo        str   required  absolute path of the git repository
     before      str   required  base ref; the range is before..after
-    after       str   required  head ref
+    after       str   required  head ref, or "worktree": the diff is `git diff <before>` (index and
+                                working tree) plus every untracked, non-ignored file as a full addition
     title       str   required  page headline (h1)
     changes     list  required  one entry per logical change, see below
     subtitle    str   optional  one or two sentences under the headline
@@ -45,7 +47,10 @@ Input JSON (unknown fields are an error):
       why       str   required  inline markdown: what it means and why it exists (evidence)
       files     list  required  paths in the diff; each becomes a button opening that file's diff
       evidence  list  optional  "path:line" or "path:start-end" labels
-      followup  bool  optional  true = a change made after a review; shown with its own tag
+      ref       str   optional  commit the evidence links of this card point at (default: after;
+                                in worktree mode without ref, evidence renders as <code> only)
+      followup  true | str  optional  a change made after a review, shown with its own tag; a string
+                                names the earlier card it fixes ("→ fixes <id>" here, "→ fixed by" there)
 
 Markdown (prose fields): ## / ### headings, paragraphs, pipe tables, - / * / 1.
 lists, fenced code, `inline code`, **bold**, [text](https://...). Everything is
@@ -67,8 +72,9 @@ Minimal example:
     }
 
 Fails loudly (exit 1) on an unknown field, a missing required field, a bad
-verdict, a malformed evidence label, a files[] path not in the diff, or a
-template placeholder that is missing or left unreplaced.
+verdict, a malformed evidence label, a ref that does not resolve, a followup
+naming an unknown card, a files[] path not in the diff, or a template
+placeholder that is missing or left unreplaced.
 """
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,6 +113,9 @@ LABELS = {
         'meaning': '의미',
         'followup_tag': '리뷰 이후 수정',
         'followup_heading': '리뷰 이후 수정',
+        'fixes': '→ {id}의 지적을 수정',
+        'fixed_by': '→ {id}에서 수정됨',
+        'worktree': '작업 트리',
         'evidence_basis': '근거: {ref}',
         'evidence_title': '근거 · {ref}',
         'verdicts': {'keep': '✅ 유지', 'cut': '✂️ 제거', 'trim': '🔻 축소', 'ask': '❓ 확인'},
@@ -149,8 +158,7 @@ LABELS = {
         'timeline_base': '기준',
         'stat_changes': '논리적 변경',
         'stat_changes_followup': '리뷰 이후 수정 {n}개 포함',
-        'stat_verdicts': '판정',
-        'stat_verdicts_sub': '유지 · 제거 · 축소 · 확인',
+        'stat_verdicts': '유지 판정',
         'stat_files': '변경 파일',
         'eyebrow_default': 'REVIEWED CHANGES',
         'footer_range': '고정된 비교: {before} → {after} · {generated} 생성 · 원격 저장소의 실시간 상태를 조회한 결과가 아닙니다.',
@@ -183,6 +191,9 @@ LABELS = {
         'meaning': 'Meaning',
         'followup_tag': 'Changed after review',
         'followup_heading': 'Changed after the review',
+        'fixes': '→ fixes {id}',
+        'fixed_by': '→ fixed by {id}',
+        'worktree': 'working tree',
         'evidence_basis': 'Evidence at {ref}',
         'evidence_title': 'Evidence · {ref}',
         'verdicts': {'keep': '✅ keep', 'cut': '✂️ cut', 'trim': '🔻 trim', 'ask': '❓ ask'},
@@ -225,8 +236,7 @@ LABELS = {
         'timeline_base': 'base',
         'stat_changes': 'logical changes',
         'stat_changes_followup': 'includes {n} changed after review',
-        'stat_verdicts': 'verdicts',
-        'stat_verdicts_sub': 'keep · cut · trim · ask',
+        'stat_verdicts': 'kept',
         'stat_files': 'files changed',
         'eyebrow_default': 'REVIEWED CHANGES',
         'footer_range': 'Fixed comparison: {before} → {after} · generated {generated} · not a live read of the remote.',
@@ -240,7 +250,7 @@ assert LABELS['ko'].keys() == LABELS['en'].keys()
 TOP_REQUIRED = {'repo', 'before', 'after', 'title', 'changes'}
 TOP_OPTIONAL = {'subtitle', 'lang', 'brand', 'eyebrow', 'ticket', 'remote_url', 'glossary', 'sections', 'question', 'stats'}
 CHANGE_REQUIRED = {'id', 'group', 'title', 'verdict', 'before', 'after', 'why', 'files'}
-CHANGE_OPTIONAL = {'evidence', 'followup'}
+CHANGE_OPTIONAL = {'evidence', 'followup', 'ref'}
 VERDICTS = ('keep', 'cut', 'trim', 'ask')
 RESERVED_SECTIONS = {'overview', 'changes', 'code'}
 EVIDENCE_RE = re.compile(r'([^\s:`]+):(\d+)(?:-(\d+))?')
@@ -264,14 +274,21 @@ def check_fields(obj, required, optional, where):
         fail(f'missing required field(s) in {where}: {", ".join(missing)}')
 
 
-# ---- git (read-only: diff, log, rev-parse, show) ----
+# ---- git (read-only: diff, log, rev-parse, show, ls-files) ----
 
-def git(repo, *args):
-    assert args[0] in ('diff', 'log', 'rev-parse', 'show'), args[0]
-    try:
-        return subprocess.run(['git', '-C', repo, *args], check=True, capture_output=True, text=True).stdout
-    except subprocess.CalledProcessError as err:
-        fail(f'git {" ".join(args)} failed: {err.stderr.strip()}')
+def git(repo, *args, ok=(0,)):
+    assert args[0] in ('diff', 'log', 'rev-parse', 'show', 'ls-files'), args[0]
+    run = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True)
+    if run.returncode not in ok:
+        fail(f'git {" ".join(args)} failed: {run.stderr.strip()}')
+    return run.stdout
+
+
+def resolve(repo, ref, where):
+    run = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', '--quiet', ref + '^{commit}'], capture_output=True, text=True)
+    if run.returncode != 0:
+        fail(f'{where}: {ref!r} is not a commit in {repo}')
+    return run.stdout.strip()
 
 
 def kind(path):
@@ -302,7 +319,8 @@ class Renderer:
     def evidence(self, label, pattern=EVIDENCE_RE):
         match = pattern.fullmatch(label)
         code = '<code>' + html.escape(label) + '</code>'
-        if not match or not self.remote_url:
+        # No link without a remote, or without a commit (worktree mode and no per-card ref).
+        if not match or not self.remote_url or not self.ref:
             return code
         path, start, end = match.groups()
         href = self.remote_url + '/blob/' + self.ref + '/' + quote(path, safe='/') + '#L' + start + ('-L' + end if end else '')
@@ -409,28 +427,37 @@ def main():
     if remote_url and not re.match(r'https?://', remote_url):
         fail(f'remote_url must start with http:// or https://, got {remote_url!r}')
 
-    before_sha = git(repo, 'rev-parse', '--verify', notes['before'] + '^{commit}').strip()
-    after_sha = git(repo, 'rev-parse', '--verify', notes['after'] + '^{commit}').strip()
-    before, after = before_sha[:7], after_sha[:7]
-    rng = f'{before_sha}..{after_sha}'
+    worktree = notes['after'] == 'worktree'
+    before_sha = resolve(repo, notes['before'], 'before')
+    after_sha = None if worktree else resolve(repo, notes['after'], 'after')
+    before, after = before_sha[:7], (L['worktree'] if worktree else after_sha[:7])
+    # Worktree mode diffs <before> against the index plus working tree; a range diffs two commits.
+    rng = [before_sha] if worktree else [f'{before_sha}..{after_sha}']
+    scope = f'{notes["before"]}..{notes["after"]}' if not worktree else f'{notes["before"]} → {L["worktree"]}'
 
     # ---- the diff, read by this script ----
-    stat = git(repo, 'diff', '--no-ext-diff', '--no-renames', '--stat', rng)
-    paths = git(repo, 'diff', '--no-ext-diff', '--no-renames', '--name-only', rng).splitlines()
-    if not paths:
-        fail(f'the range {notes["before"]}..{notes["after"]} has no changes')
-    commits = git(repo, 'log', '--reverse', '--format=%h%x09%s', rng).splitlines()
+    diff = ('diff', '--no-ext-diff', '--no-color', '--no-renames')
+    stat = git(repo, *diff, '--stat', *rng)
+    paths = git(repo, *diff, '--name-only', *rng).splitlines()
+    untracked = git(repo, 'ls-files', '--others', '--exclude-standard').splitlines() if worktree else []
+    if not paths and not untracked:
+        fail(f'{scope} has no changes')
+    commits = [] if worktree else git(repo, 'log', '--reverse', '--format=%h%x09%s', *rng).splitlines()
     delta = []
-    for path in paths:
-        patch = git(repo, 'diff', '--no-ext-diff', '--no-color', '--no-renames', rng, '--', path)
+    for path in paths + untracked:
+        if path in untracked:
+            # --no-index exits 1 when the files differ, which is always the case against /dev/null.
+            patch = git(repo, *diff, '--no-index', '--', '/dev/null', path, ok=(0, 1))
+        else:
+            patch = git(repo, *diff, *rng, '--', path)
         if patch.count('\ndiff --git ') + patch.startswith('diff --git ') != 1:
             fail(f'expected exactly one file patch for {path}')
         added, removed = count(patch)
         delta.append(dict(path=path, added=added, removed=removed, kind=kind(path), patch=patch))
-    full = git(repo, 'diff', '--no-ext-diff', '--no-color', '--no-renames', rng)
+    full = git(repo, *diff, *rng) + ''.join(f['patch'] for f in delta[len(paths):])
     if ''.join(f['patch'] for f in delta) != full:
         fail('per-file patches do not add up to the full diff')
-    in_diff = set(paths)
+    in_diff = set(paths) | set(untracked)
 
     # ---- changes ----
     changes = notes['changes']
@@ -438,6 +465,7 @@ def main():
         fail('changes must be a non-empty list')
     render = Renderer(remote_url, after_sha, L)
     seen = set()
+    refs = {}
     cards = []
     for n, c in enumerate(changes):
         where = f'changes[{n}]' + (f' (id {c.get("id")!r})' if isinstance(c, dict) and 'id' in c else '')
@@ -456,7 +484,7 @@ def main():
             fail(f'{where}.files must be a non-empty list of paths')
         for path in c['files']:
             if path not in in_diff:
-                fail(f'{where}.files path is not in the diff {notes["before"]}..{notes["after"]}: {path!r}')
+                fail(f'{where}.files path is not in the diff {scope}: {path!r}')
         evidence = c.get('evidence', [])
         if not isinstance(evidence, list):
             fail(f'{where}.evidence must be a list')
@@ -464,15 +492,34 @@ def main():
             if not isinstance(label, str) or not EVIDENCE_RE.fullmatch(label):
                 fail(f'{where}.evidence entry is not "path:line" or "path:start-end": {label!r}')
         followup = c.get('followup', False)
-        if not isinstance(followup, bool):
-            fail(f'{where}.followup must be true or false')
+        if not (followup is True or followup is False or (isinstance(followup, str) and followup)):
+            fail(f'{where}.followup must be true or the id of the earlier change it fixes')
+        if 'ref' in c:
+            if not isinstance(c['ref'], str) or not c['ref'].strip():
+                fail(f'{where}.ref must be a non-empty string')
+            if c['ref'] not in refs:
+                refs[c['ref']] = resolve(repo, c['ref'], f'{where}.ref')
+            card_ref = refs[c['ref']]
+        else:
+            card_ref = after_sha
+        card = Renderer(remote_url, card_ref, L)
         cards.append(dict(
             id=c['id'], group=c['group'], title=c['title'], verdict=c['verdict'], files=c['files'], followup=followup,
-            before_html=render.inline(c['before']), after_html=render.inline(c['after']), why_html=render.inline(c['why']),
-            evidence_html=[render.evidence(label).replace('</code></a>', '</code> ↗</a>') for label in evidence],
+            ref=card_ref[:7] if card_ref else L['worktree'], fixed_by=[],
+            before_html=card.inline(c['before']), after_html=card.inline(c['after']), why_html=card.inline(c['why']),
+            evidence_html=[card.evidence(label).replace('</code></a>', '</code> ↗</a>') for label in evidence],
             search=' '.join([c['id'], c['group'], c['title'], L['verdicts'][c['verdict']], c['before'], c['after'], c['why'],
                              *c['files'], *evidence, L['followup_tag'] if followup else '']),
         ))
+    by_id = {c['id']: c for c in cards}
+    for c in cards:
+        if isinstance(c['followup'], str):
+            if c['followup'] not in by_id or c['followup'] == c['id']:
+                fail(f'change {c["id"]!r}.followup names an unknown change id: {c["followup"]!r}')
+            by_id[c['followup']]['fixed_by'].append(c['id'])
+            c['search'] += ' ' + L['fixes'].format(id=c['followup'])
+    for c in cards:
+        c['search'] += ''.join(' ' + L['fixed_by'].format(id=i) for i in c['fixed_by'])
     # Follow-up cards sit at the bottom under their own heading; order is otherwise the caller's.
     cards = [c for c in cards if not c['followup']] + [c for c in cards if c['followup']]
     for f in delta:
@@ -498,15 +545,16 @@ def main():
 
     # ---- overview ----
     counts = {v: sum(c['verdict'] == v for c in cards) for v in VERDICTS}
-    followups = sum(c['followup'] for c in cards)
+    followups = sum(bool(c['followup']) for c in cards)
     total_added, total_removed = sum(f['added'] for f in delta), sum(f['removed'] for f in delta)
     stats = notes.get('stats')
     if stats is None:
         stats = [
             {'value': str(len(cards)), 'label': L['stat_changes'],
              'sub': L['stat_changes_followup'].format(n=followups) if followups else ''},
-            {'value': ' · '.join(L['verdicts'][v].split(' ')[0] + ' ' + str(counts[v]) for v in VERDICTS),
-             'label': L['stat_verdicts'], 'sub': L['stat_verdicts_sub']},
+            # Only the keep count is the big figure, so the card never wraps; the other three ride the sub line.
+            {'value': L['verdicts']['keep'].split(' ')[0] + ' ' + str(counts['keep']), 'label': L['stat_verdicts'],
+             'sub': ' · '.join(L['verdicts'][v].split(' ')[0] + ' ' + str(counts[v]) for v in VERDICTS[1:])},
             {'value': str(len(delta)), 'label': L['stat_files'], 'sub': f'+{total_added} / −{total_removed}'},
         ]
     else:
@@ -558,20 +606,22 @@ def main():
 
     # ---- head, rail, footer ----
     ticket = notes.get('ticket')
+    commit_count = '' if worktree else ' · ' + html.escape(L['commits_n'].format(n=len(commits)))
     pills = (f'<span class="pill green">{html.escape(ticket)}</span>' if ticket else '') + \
-        f'<span class="pill">{before} → {after} · {html.escape(L["commits_n"].format(n=len(commits)))}</span>'
+        f'<span class="pill">{html.escape(before)} → {html.escape(after)}{commit_count}</span>'
     intro = (f'<div class="tag-line">{pills}</div><h1 id="review-title">{html.escape(notes["title"])}</h1>'
              + (f'<p class="intro-copy">{render.inline(notes["subtitle"])}</p>' if notes.get('subtitle') else '')
-             + f'<p class="commit-meta">{" → ".join([before] + [line.split(chr(9))[0] for line in commits])} · '
+             + f'<p class="commit-meta">{html.escape(" → ".join([before] + [line.split(chr(9))[0] for line in commits] + ([after] if worktree else [])))} · '
              f'{html.escape(L["files_n"].format(n=len(delta)))}</p>')
-    compare_url = f'{remote_url}/compare/{before_sha}...{after_sha}' if remote_url else None
+    compare_url = f'{remote_url}/compare/{before_sha}...{after_sha}' if remote_url and after_sha else None
     remote_link = (f'<a href="{html.escape(compare_url)}" target="_blank" rel="noopener">{html.escape(L["remote_compare"])}</a>'
                    if compare_url else '')
     brand = notes.get('brand') or 'Review'
     now = datetime.now(timezone.utc)
     eyebrow = notes.get('eyebrow') or f'{now.strftime("%B").upper()} {now.day}, {now.year} · {L["eyebrow_default"]}'
-    rail_bottom = (f'<p>{html.escape(L["compare_base"])}<br><b>{before} → {after}</b><br>'
-                   f'{html.escape(L["commits_n"].format(n=len(commits)))} · {html.escape(L["files_n"].format(n=len(delta)))}</p>' + remote_link)
+    rail_bottom = (f'<p>{html.escape(L["compare_base"])}<br><b>{html.escape(before)} → {html.escape(after)}</b><br>'
+                   + ('' if worktree else html.escape(L['commits_n'].format(n=len(commits))) + ' · ')
+                   + f'{html.escape(L["files_n"].format(n=len(delta)))}</p>' + remote_link)
     question = ''
     if notes.get('question'):
         question = (f'<div class="core-question" id="reviewer-question"><span>{html.escape(L["question_label"])}</span>'
@@ -585,7 +635,7 @@ def main():
     order = list(sections)
     data = dict(lang=lang, before=before, after=after, before_sha=before_sha, after_sha=after_sha, remote_url=remote_url,
                 labels={k: L[k] for k in ('change_count', 'followup_heading', 'followup_tag', 'verdicts', 'before', 'after',
-                                          'after_followup', 'meaning', 'evidence_basis', 'no_matches', 'reset_search',
+                                          'after_followup', 'meaning', 'evidence_basis', 'fixes', 'fixed_by', 'no_matches', 'reset_search',
                                           'diff_basis', 'version_note', 'version_note_links', 'file_count', 'kinds',
                                           'file_stat', 'new_file', 'deleted_file', 'old_source', 'new_source',
                                           'line_old', 'line_new')},
@@ -604,7 +654,7 @@ def main():
         '@@L_CHANGES_NAV@@': esc(L['changes_nav']), '@@L_SEARCH_LABEL@@': esc(L['search_label']),
         '@@L_SEARCH_PLACEHOLDER@@': esc(L['search_placeholder']), '@@CHANGES_NOTE@@': esc(changes_note),
         '@@L_CODE_NAV@@': esc(L['code_nav']), '@@L_WHOLE_RANGE@@': esc(L['whole_range']),
-        '@@PATCH_NAME@@': esc(f'{before}..{after}.patch'), '@@L_DOWNLOAD_PATCH@@': esc(L['download_patch']),
+        '@@PATCH_NAME@@': esc(f'{before}..{"worktree" if worktree else after}.patch'), '@@L_DOWNLOAD_PATCH@@': esc(L['download_patch']),
         '@@REMOTE_COMPARE@@': remote_link, '@@L_FILE_SEARCH_LABEL@@': esc(L['file_search_label']),
         '@@L_FILE_SEARCH_PLACEHOLDER@@': esc(L['file_search_placeholder']), '@@L_KIND_LABEL@@': esc(L['kind_label']),
         '@@KIND_OPTIONS@@': kind_options, '@@L_FILE_GROUP@@': esc(L['file_group']), '@@L_FILE_EMPTY@@': esc(L['file_empty']),
@@ -626,7 +676,7 @@ def main():
     out_path.write_text(page)
     size = len(page.encode())
     print(f'build_review_page: wrote {out_path}')
-    print(f'  range   {notes["before"]}..{notes["after"]} ({before}..{after}), {len(commits)} commits')
+    print(f'  range   {scope} ({before} → {after}), {len(commits)} commits' + (f', {len(untracked)} untracked' if worktree else ''))
     print(f'  files   {len(delta)} (+{total_added} −{total_removed}); git --stat: {stat.strip().splitlines()[-1].strip()}')
     print(f'  changes {len(cards)} (keep {counts["keep"]}, cut {counts["cut"]}, trim {counts["trim"]}, ask {counts["ask"]}; followup {followups})')
     print(f'  sections {len(prose)} prose, glossary {"yes" if notes.get("glossary") else "no"}, question {"yes" if question else "no"}')
